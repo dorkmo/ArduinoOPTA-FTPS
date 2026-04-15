@@ -5,7 +5,7 @@ ArduinoOPTA-FTPS is an experimental repository for a general-purpose FTPS client
 The goal is to provide a reusable, Opta-first FTPS library built on the board's Ethernet and Mbed networking stack, with initial validation targeted against a WD My Cloud PR4100, vsftpd, and FileZilla Server, and designed to support other standards-compliant FTPS servers over time.
 
 > [!IMPORTANT]
-> This repository now includes early library scaffolding (public headers, transport interface, and example sketches), but FTPS transport/client logic is still stubbed. Treat FTPS support as experimental until the Opta hardware spike is completed and implementation phases are finished.
+> This repository now includes an initial Explicit FTPS implementation built on the Opta Mbed networking stack. Treat it as experimental until it has been validated on real Opta hardware against the target servers in your environment.
 
 ## Project Goals
 
@@ -76,15 +76,14 @@ When the first implementation lands, the library is expected to rely on:
 
 This repository is not yet published to Arduino Library Manager.
 
-For development, it can be used as a local library checkout. Keep in mind that the current `src/` content is scaffolding-only and not a production-ready FTPS implementation yet.
+For development, it can be used as a local library checkout. The library now contains a first-pass FTPS implementation, but it still needs live Opta validation and interoperability testing before it should be treated as release-ready.
 
 ## Current API Direction
 
-The public API is intended to stay small and Arduino-style. The current scaffold direction looks like this:
+The public API is intentionally small and Arduino-style. The current implementation direction looks like this:
 
 ```cpp
-// Illustrative scaffold usage.
-// Current methods are declared in src/FtpsClient.h but still stubbed.
+// Illustrative usage.
 
 FtpsServerConfig config;
 config.host = "192.168.1.100";
@@ -94,8 +93,8 @@ config.password = "pass";
 config.tlsServerName = "nas.local";
 config.trustMode = FtpsTrustMode::Fingerprint;
 config.fingerprint = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
+// Current implementation is fail-closed and requires certificate validation.
 config.validateServerCert = true;
-config.passiveMode = true;
 
 FtpsClient client;
 char error[96];
@@ -130,11 +129,13 @@ if (client.connect(config, error, sizeof(error))) {
 
 The public API surface is `begin()`, `connect()`, `store()`, `retrieve()`, `quit()`, and `lastError()`. `begin()` initializes the transport layer with the Mbed `NetworkInterface` and must be called once before `connect()`. `lastError()` returns an `FtpsError` enum for programmatic error handling alongside the human-readable `char*` error buffer.
 
+The v1 public config intentionally does not expose `securityMode` or `passiveMode` toggles. Until additional modes are implemented, the library surface is fixed to Explicit FTPS plus protected passive transfers so sketches cannot accidentally rely on unsupported options.
+
 ## Trust Model
 
 - SHA-256 leaf-certificate fingerprint pinning
 - Imported PEM certificate trust
-- Certificate validation enabled by default
+- Certificate validation required (fail-closed)
 - No silent fallback from FTPS to plaintext FTP
 
 ## Current and Planned Examples
@@ -143,33 +144,37 @@ The repository currently includes:
 
 - `examples/BasicUpload/BasicUpload.ino`
 - `examples/BasicDownload/BasicDownload.ino`
+- `examples/FileZillaLiveTest/FileZillaLiveTest.ino`
+- `examples/WebHarnessLiveTest/WebHarnessLiveTest.ino`
 - `FtpsSpikeTest/FtpsSpikeTest.ino`
 
-Planned follow-up examples after transport/client implementation lands:
+The upload/download examples and the FileZilla live-test sketch emit structured serial diagnostics so Opta-side runs are easy to inspect in the serial monitor. The web harness sketch hosts a lightweight LAN page for updating FTPS settings and running small connect/upload/download/quit tests without reflashing, uses token-gated actions behind a small passcode unlock step, and supports downloadable plain-text test reports.
+
+Planned follow-up examples after broader transport/client validation lands:
 
 - Trust-mode-focused fingerprint validation example
 - Trust-mode-focused imported PEM validation example
 - PR4100 reference setup
 - vsftpd reference setup
-- FileZilla Server reference setup
+- Additional FileZilla Server reference variants
 
 ## Current Status
 
-This repository currently contains planning docs plus scaffold code:
+This repository currently contains planning docs plus a first-pass implementation:
 
 - Architecture and implementation notes
 - An execution checklist for the FTPS migration
 - A repository bootstrap and extraction plan
 - A Phase 0 transport spike plan for Arduino Opta hardware
-- Library skeleton files in `src/` (`FtpsClient`, `FtpsTypes`, `FtpsErrors`, trust/transport stubs)
-- Upload/download scaffold examples and a full spike sketch
+- Library source files in `src/` (`FtpsClient`, `FtpsTypes`, `FtpsErrors`, trust helpers, transport implementation)
+- Upload/download examples, a FileZilla live-test sketch, a web harness live-test sketch, and a full spike sketch
 
 Before a first experimental release, the project still needs:
 
-1. A real Opta hardware spike proving `AUTH TLS` control upgrade with `TLSSocketWrapper`
-2. Protected passive data-channel validation
-3. Functional (non-stub) upload and download implementations
-4. Fingerprint and imported-certificate validation tests
+1. Real Opta hardware validation against FileZilla Server and the other reference servers
+2. Protected passive data-channel interoperability checks, especially around TLS session reuse behavior
+3. On-device fingerprint and imported-certificate validation runs
+4. Example compile validation and release hardening
 
 ## Limitations
 
@@ -186,6 +191,8 @@ Before a first experimental release, the project still needs:
 - [Implementation checklist](CODE%20REVIEW/FTPS_IMPLEMENTATION_CHECKLIST_04132026.md)
 - [Repository creation plan](CODE%20REVIEW/FTPS_REPOSITORY_REVIEW_04132026.md)
 - [Phase 0 spike plan](CODE%20REVIEW/FTPS_SPIKE_PLAN_04142026.md)
+- [Serial monitor output guide](CODE%20REVIEW/SERIAL_MONITOR_OUTPUT_04152026.md)
+- [Web harness API reference](CODE%20REVIEW/WEB_HARNESS_API_REFERENCE_04152026.md)
 
 ## License
 

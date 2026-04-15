@@ -7,6 +7,13 @@
 enum class FtpsError {
   None = 0,
   NetworkNotInitialized,
+  BannerReadFailed,
+  PbszRejected,
+  ProtPRejected,
+  TypeRejected,
+  PasvParseFailed,
+  DataConnectionFailed,
+  QuitFailed,
   AuthTlsRejected,
   ControlTlsHandshakeFailed,
   CertValidationFailed,

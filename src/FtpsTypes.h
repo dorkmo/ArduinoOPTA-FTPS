@@ -6,29 +6,23 @@
 
 #include <stdint.h>
 
-enum class FtpsSecurityMode : uint8_t {
-  Plain = 0,
-  ExplicitTls = 1,
-  ImplicitTls = 2,
-};
-
 enum class FtpsTrustMode : uint8_t {
   Fingerprint = 0,
   ImportedCert = 1,
 };
 
+/// v1 is fixed to Explicit FTPS over protected passive transfers.
+/// Additional mode switches should not be exposed publicly until implemented.
 struct FtpsServerConfig {
   const char *host = nullptr;
   uint16_t port = 21;
   const char *user = nullptr;
   const char *password = nullptr;
   const char *tlsServerName = nullptr;
-  FtpsSecurityMode securityMode = FtpsSecurityMode::ExplicitTls;
   FtpsTrustMode trustMode = FtpsTrustMode::Fingerprint;
   const char *fingerprint = nullptr;
   const char *rootCaPem = nullptr;
   bool validateServerCert = true;
-  bool passiveMode = true;
 };
 
 #endif // FTPS_TYPES_H

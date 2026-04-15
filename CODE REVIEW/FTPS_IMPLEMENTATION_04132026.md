@@ -2,7 +2,7 @@
 
 **Date:** April 13, 2026  
 **Scope:** General-purpose FTPS client library design for Arduino Opta  
-**Status:** Design note only; not implemented
+**Status:** Design note plus implemented first pass; live hardware validation still pending
 
 ---
 
@@ -1026,7 +1026,6 @@ struct FtpsServerConfig {
   const char *fingerprint = nullptr;
   const char *rootCaPem = nullptr;
   bool validateServerCert = true;
-  bool passiveMode = true;
 };
 ```
 
@@ -1385,15 +1384,15 @@ The public API uses FTP-protocol-native names (`store`, `retrieve`) rather than 
 
 `FtpsClient` creates and destroys its `IFtpsTransport` instance. There is no dependency injection for v1 — the Mbed transport is the only supported path. The transport interface (`IFtpsTransport`) exists so unit tests can mock it and so alternative transports can be added later without changing the public API.
 
-### 4. `FtpsSecurityMode` enum added
+### 4. Public config fixed to Explicit FTPS for v1
 
-`FtpsSecurityMode { Plain, ExplicitTls, ImplicitTls }` is defined in `FtpsTypes.h` and exposed via `FtpsServerConfig::securityMode`. The default is `ExplicitTls`. `ImplicitTls` and `Plain` are defined for forward compatibility but not implemented in v1.
+`FtpsServerConfig` no longer exposes `securityMode` or `passiveMode` in the public API. While v1 remains Explicit FTPS plus protected passive transfers only, those behaviors are fixed rather than configurable.
 
-The transport layer also has a parallel `FtpTlsSecurityMode` enum in `IFtpsTransport.h` to keep the transport interface independent of the client-level types. `FtpsClient` maps between them during `connect()`.
+The transport layer keeps `FtpTlsSecurityMode` internally in `IFtpsTransport.h` so backend work can still model future modes without overpromising unsupported public options.
 
 ### 5. Error return pattern: `bool` + `char*` + `lastError()`
 
-The primary return is `bool` (success/fail) with a human-readable message in the `char*` buffer. For programmatic error handling, `FtpsClient::lastError()` returns the `FtpsError` enum from the most recent failed operation. New error codes added: `NetworkNotInitialized`, `PassiveModeRejected`, `ConnectionFailed`.
+The primary return is `bool` (success/fail) with a human-readable message in the `char*` buffer. For programmatic error handling, `FtpsClient::lastError()` returns the `FtpsError` enum from the most recent failed operation. The first implementation pass now includes specific FTPS failure categories such as `NetworkNotInitialized`, `BannerReadFailed`, `PassiveModeRejected`, `DataConnectionFailed`, and `ConnectionFailed`.
 
 ### 6. Trust helpers declared in `FtpsTrust.h`
 
@@ -1411,7 +1410,7 @@ A collision scan was performed against four major Arduino FTP libraries: **ESP32
 
 Full analysis and naming rules are documented in `CODE REVIEW/NAMING_CONVENTIONS_04152026.md`.
 
-**Open decision:** `FtpsSecurityMode` (public API) and `FtpTlsSecurityMode` (transport layer) are duplicate enums with identical values. This must be resolved before v1.0 — see options A/B/C in the naming conventions document.
+The duplicate public/internal security-mode enum issue is now avoided by keeping `FtpTlsSecurityMode` transport-internal until non-v1 modes are actually implemented.
 
 ---
 
@@ -1719,7 +1718,7 @@ After those documentation fixes, the spike plan is valid as the Phase 0 gate.
 
 ### Summary of review findings
 
-Two full review passes plus a spike-plan review have been completed across the FTPS documents and the reference firmware. Most architecture-level findings are now closed in docs and scaffold code. Remaining open items are implementation-facing: session-reuse behavior validation, helper-migration mechanics (`ftpReadResponse` / `ftpSendCommand`), data-channel lifetime migration, and timeout tuning.
+Two full review passes plus a spike-plan review have been completed across the FTPS documents and the reference firmware, and the first implementation pass has now been landed in the repository. Remaining open items are hardware-facing: session-reuse behavior validation, trust-mode validation against real servers, timeout tuning, and compile/release hardening.
 
 No remaining finding invalidates the planned architecture. The unresolved items are concrete implementation checkpoints that should be addressed during Phase 0 and early Phase 2.
 

@@ -28,7 +28,6 @@ Our `Ftps` prefix cleanly separates every public symbol:
 | `FTPS_CLIENT_H` | `FTP_CLIENT_H` (dplasa) | ✅ "S_" differentiates |
 | `FtpsError` | (none) | ✅ |
 | `FtpsServerConfig` | `ServerInfo` (dplasa) | ✅ |
-| `FtpsSecurityMode` | (none) | ✅ |
 | `FtpsTrustMode` | (none) | ✅ |
 | `ftpsTrust*()` functions | (none) | ✅ |
 | `IFtpsTransport` | (none) | ✅ |
@@ -51,7 +50,8 @@ dplasa defines bare `FTP_*` macros (`FTP_CTRL_PORT 21`, `FTP_DATA_PORT_PASV 0`, 
 ### 3.2 Enums
 
 - **`enum class`** (scoped), never plain `enum` or `#define`
-- PascalCase name with `Ftps` prefix: `FtpsError`, `FtpsSecurityMode`, `FtpsTrustMode`
+- PascalCase name with `Ftps` prefix for public enums: `FtpsError`, `FtpsTrustMode`
+- Transport-internal enums may use `Ftp` prefix when they are not part of the public API: `FtpTlsSecurityMode`
 - PascalCase values: `ExplicitTls`, `ConnectionFailed`
 
 ### 3.3 Methods
@@ -98,12 +98,8 @@ dplasa defines bare `FTP_*` macros (`FTP_CTRL_PORT 21`, `FTP_DATA_PORT_PASV 0`, 
 
 ---
 
-## 5. Open Design Note
+## 5. Resolved Design Note
 
-`FtpsSecurityMode` (in `FtpsTypes.h`) and `FtpTlsSecurityMode` (in `IFtpsTransport.h`) define identical values (`Plain`, `ExplicitTls`, `ImplicitTls`). This is intentional layering — the public API enum vs the transport-internal enum — but the duplication should be resolved before v1.0 release. Options:
+The public API no longer exposes `FtpsSecurityMode` while v1 remains fixed to Explicit FTPS. That removes the duplicate-enum problem from the public surface and avoids advertising unsupported modes.
 
-- **A.** Transport references `FtpsSecurityMode` directly (adds dependency on `FtpsTypes.h`)
-- **B.** Transport keeps its own enum; `FtpsClient` converts between them in `connect()`
-- **C.** Extract a shared `FtpSecurityMode` into a common header both layers include
-
-**Decision needed before implementation.**
+`FtpTlsSecurityMode` remains transport-internal in `IFtpsTransport.h` so the backend can still model future protocol expansion without locking those switches into the user-facing config prematurely.

@@ -1,7 +1,7 @@
 # FTPS Implementation Checklist — Arduino Opta FTPS Library
 
 **Date:** April 13, 2026  
-**Scope:** Planning checklist with scaffold tracking; functional FTPS implementation still pending  
+**Scope:** Planning checklist with initial implementation landed; hardware validation and hardening still pending  
 **Related Note:** `FTPS_IMPLEMENTATION_04132026.md`
 
 ---
@@ -27,7 +27,7 @@ This checklist converts the FTPS design note into an ordered implementation plan
 - Target **Explicit TLS FTPS** only for the current plan.
 - Keep **plain FTP** available during transition unless intentionally removed later.
 - Keep **Implicit TLS** out of scope for the current plan.
-- Do **not** implement any of the items below in this pass.
+- Use the remaining items below as validation and hardening work for the first implementation pass.
 
 ---
 
@@ -81,14 +81,14 @@ This checklist converts the FTPS design note into an ordered implementation plan
 
 - [x] Define `FtpsServerConfig` struct with FTPS fields. *(Done in `src/FtpsTypes.h`.)*
 - [x] Define a strongly-typed FTPS trust-mode enum. *(`FtpsTrustMode` in `src/FtpsTypes.h`.)*
-- [x] Define a strongly-typed FTPS security-mode enum. *(`FtpsSecurityMode { Plain, ExplicitTls, ImplicitTls }` in `src/FtpsTypes.h`; default `ExplicitTls`.)*
+- [x] Keep the public config fixed to Explicit FTPS until additional modes are implemented. *(`FtpsServerConfig` no longer exposes `securityMode`; Explicit FTPS is implicit in the v1 API surface.)*
 - [x] Add defaults for:
   - trust mode — `Fingerprint`
   - certificate validation — `true`
   - TLS server name — `nullptr`
   - pinned fingerprint — `nullptr`
-  - security mode — `ExplicitTls`
 - [x] Default `validateServerCert` to `true`.
+- [x] Keep passive mode fixed in the public config until non-passive transfers exist. *(`FtpsServerConfig` no longer exposes `passiveMode`; passive transfers remain the only planned v1 behavior.)*
 - [ ] If a debug-only `allowInsecureTls` flag is retained, default it to `false` and keep it out of the public API surface.
 - [ ] Use canonical imported-cert conventions:
   - `/ftps/server_trust.pem`
@@ -100,7 +100,6 @@ This checklist converts the FTPS design note into an ordered implementation plan
 
 ### Suggested Fields
 
-- [x] `securityMode` (`0=plain`, `1=explicit-tls`, `2=implicit-tls`; default explicit)
 - [x] `trustMode` (`0=fingerprint`, `1=imported-cert`)
 - [x] `validateServerCert`
 - [x] `tlsServerName`
@@ -116,7 +115,7 @@ This checklist converts the FTPS design note into an ordered implementation plan
 ### Exit Criteria
 
 - [ ] Config types compile cleanly.
-- [x] Default values produce safe behavior. *(Explicit TLS, validate cert on, fingerprint mode.)*
+- [x] Default values produce safe behavior. *(Explicit FTPS by fixed v1 behavior, validate cert on, fingerprint mode.)*
 - [ ] Host applications can persist and reload FTPS metadata correctly.
 
 ---

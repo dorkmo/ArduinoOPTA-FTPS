@@ -1,15 +1,23 @@
 // ArduinoOPTA-FTPS - Explicit FTPS client library for Arduino Opta
 // SPDX-License-Identifier: CC0-1.0
 //
-// Mbed TLSSocketWrapper-based FTPS transport — stub pending Phase 0 spike.
+// Mbed TLSSocketWrapper-based FTPS transport.
 
 #ifndef MBED_SECURE_SOCKET_FTPS_TRANSPORT_H
 #define MBED_SECURE_SOCKET_FTPS_TRANSPORT_H
 
 #include "IFtpsTransport.h"
 
+class NetworkInterface;
+class TCPSocket;
+class TLSSocketWrapper;
+struct mbedtls_ssl_session;
+
 class MbedSecureSocketFtpsTransport : public IFtpsTransport {
 public:
+  explicit MbedSecureSocketFtpsTransport(NetworkInterface *network);
+  ~MbedSecureSocketFtpsTransport() override;
+
   bool connectControl(const FtpEndpoint &ep, const FtpTlsConfig &tls, char *error, size_t errorSize) override;
   bool upgradeControlToTls(const FtpTlsConfig &tls, char *error, size_t errorSize) override;
 
@@ -24,6 +32,40 @@ public:
   void closeData() override;
 
   void closeAll() override;
+
+  bool getPeerCertFingerprint(char *out, size_t outLen) override;
+  int getLastTlsError() override;
+
+private:
+  bool connectSocket(TCPSocket *&socket,
+                     const FtpEndpoint &ep,
+                     char *error,
+                     size_t errorSize);
+  bool configureTlsSocket(TLSSocketWrapper &socket,
+                          const FtpTlsConfig &tls,
+                          char *error,
+                          size_t errorSize);
+  bool completePinnedFingerprintCheck(TLSSocketWrapper &socket,
+                                      const char *expectedFingerprint,
+                                      char *error,
+                                      size_t errorSize);
+  void clearCachedControlSession();
+  void cacheControlSession();
+  bool applyCachedControlSession(TLSSocketWrapper &socket);
+  void destroySockets();
+  bool fingerprintFromSocket(TLSSocketWrapper &socket, char *out, size_t outLen);
+  void closeControl();
+
+  NetworkInterface *_network = nullptr;
+  TCPSocket *_controlSocket = nullptr;
+  TLSSocketWrapper *_controlTls = nullptr;
+  TCPSocket *_dataSocket = nullptr;
+  TLSSocketWrapper *_dataTls = nullptr;
+  bool _controlConnected = false;
+  bool _dataConnected = false;
+  mbedtls_ssl_session *_cachedControlSession = nullptr;
+  bool _cachedControlSessionValid = false;
+  int _lastTlsError = 0;
 };
 
 #endif // MBED_SECURE_SOCKET_FTPS_TRANSPORT_H

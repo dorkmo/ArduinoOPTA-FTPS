@@ -1,13 +1,15 @@
 // ArduinoOPTA-FTPS - Explicit FTPS client library for Arduino Opta
 // SPDX-License-Identifier: CC0-1.0
 //
-// Stub header — implementation pending Phase 0 spike results.
+// Explicit FTPS client for Arduino Opta.
 
 #ifndef FTPS_CLIENT_H
 #define FTPS_CLIENT_H
 
 #include "FtpsTypes.h"
 #include "FtpsErrors.h"
+
+#include <stddef.h>
 
 class IFtpsTransport;
 class NetworkInterface;
@@ -45,7 +47,21 @@ public:
   FtpsError lastError() const;
 
 private:
+  static constexpr size_t kMaxHostLen = 128;
+  static constexpr size_t kMaxUserLen = 96;
+  static constexpr size_t kMaxPasswordLen = 128;
+  static constexpr size_t kMaxTlsServerNameLen = 128;
+  static constexpr size_t kMaxRootCaPemLen = 4096 + 1;
+
   IFtpsTransport *_transport = nullptr;
+  FtpsServerConfig _activeConfig = {};
+  char _activeHost[kMaxHostLen] = {};
+  char _activeUser[kMaxUserLen] = {};
+  char _activePassword[kMaxPasswordLen] = {};
+  char _activeTlsServerName[kMaxTlsServerNameLen] = {};
+  char _activeRootCaPem[kMaxRootCaPemLen] = {};
+  char _normalizedFingerprint[65] = {};
+  bool _connected = false;
   FtpsError _lastError = FtpsError::None;
 };
 

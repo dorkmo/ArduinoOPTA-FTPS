@@ -25,10 +25,10 @@ The repository now includes:
 - planning docs
 - tracked TODOs
 - proposed API and file structure
-- scaffold examples and a full spike sketch
+- working library sources, live-test examples, and a full spike sketch
 - metadata scaffolding
 
-The first actual backend implementation still depends on the blocked item below.
+The first actual backend implementation is now in the repository. The main remaining gate is live Opta validation against the target servers.
 
 ---
 
@@ -82,7 +82,7 @@ The new repository can be created immediately if it starts as one of these:
 
 - a private working repository
 - a public repository clearly marked as experimental and unreleased
-- a public repository that contains planning docs and scaffolding only
+- a public repository that contains planning docs plus an explicitly experimental implementation
 
 ### What should not happen yet
 
@@ -238,7 +238,6 @@ struct FtpsServerConfig {
   const char *fingerprint = nullptr;
   const char *rootCaPem = nullptr;
   bool validateServerCert = true;
-  bool passiveMode = true;
 };
 ```
 

@@ -33,7 +33,7 @@ static const char *FTP_TEST_FILE  = "spike_test.txt";
 // Informational only unless you also customize the underlying Mbed TLS
 // auth mode. The sketch below does not implement a real verify-none path.
 // For the first meaningful spike run, prefer supplying ROOT_CA_PEM.
-static const bool VALIDATE_CERT   = false;
+static const bool SPIKE_CERT_VALIDATION_DISABLED = true;
 
 // Optional: PEM-encoded root CA certificate for the server.
 // Prefer setting this for the first meaningful spike run.
@@ -151,20 +151,39 @@ static bool parsePasv(const char *response, SocketAddress &addr) {
   if (!p) return false;
   p++;
 
-  int parts[6] = {0};
+  unsigned int parts[6] = {0};
   int idx = 0;
+  bool hasDigits = false;
   for (; *p && idx < 6; ++p) {
     if (isdigit(*p)) {
-      parts[idx] = parts[idx] * 10 + (*p - '0');
-    } else if (*p == ',' || *p == ')') {
+      unsigned int digit = static_cast<unsigned int>(*p - '0');
+      if (parts[idx] > 25U || (parts[idx] == 25U && digit > 5U)) {
+        return false;
+      }
+      parts[idx] = (parts[idx] * 10U) + digit;
+      hasDigits = true;
+      continue;
+    }
+
+    if (*p == ',' || *p == ')') {
+      if (!hasDigits) {
+        return false;
+      }
+      hasDigits = false;
       idx++;
+      if (*p == ')') {
+        break;
+      }
     }
   }
   if (idx < 6) return false;
 
   char ip[20];
   snprintf(ip, sizeof(ip), "%d.%d.%d.%d", parts[0], parts[1], parts[2], parts[3]);
-  uint16_t port = (parts[4] << 8) | parts[5];
+  uint16_t port = static_cast<uint16_t>((parts[4] << 8U) | parts[5]);
+  if (port == 0) {
+    return false;
+  }
 
   addr.set_ip_address(ip);
   addr.set_port(port);
@@ -275,9 +294,9 @@ void setup() {
            caErr == NSAPI_ERROR_OK ? "loaded" : "failed");
   }
 
-  if (!VALIDATE_CERT) {
+  if (SPIKE_CERT_VALIDATION_DISABLED) {
     Serial.println("  WARNING: Certificate validation DISABLED (spike only)");
-    // NOTE: In this sketch, VALIDATE_CERT only affects this message.
+    // NOTE: In this sketch, SPIKE_CERT_VALIDATION_DISABLED only affects this message.
     // It does NOT call mbedtls_ssl_conf_authmode(MBEDTLS_SSL_VERIFY_NONE).
     // If ROOT_CA_PEM is null, a self-signed certificate can still
     // cause the handshake to fail and that is not enough to disprove Option C.
@@ -509,7 +528,7 @@ void setup() {
   Serial.println("is viable for Explicit FTPS on Arduino Opta.");
   Serial.println();
   Serial.println("Next steps:");
-  Serial.println("  1. Re-run with VALIDATE_CERT = true and ROOT_CA_PEM set");
+  Serial.println("  1. Re-run with SPIKE_CERT_VALIDATION_DISABLED = false and ROOT_CA_PEM set");
   Serial.println("  2. Test RETR (download) in addition to STOR (upload)");
   Serial.println("  3. Observe RAM usage (freeMemory or heap stats if available)");
   Serial.println("  4. Proceed to Phase 1 of the FTPS implementation plan");

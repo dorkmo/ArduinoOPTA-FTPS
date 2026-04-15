@@ -8,6 +8,12 @@ All notable changes to this project will be documented in this file.
 - Initial repository structure with design documents.
 - Phase 0 transport spike plan.
 - Library scaffolding (headers, types, transport interface).
+- Serial monitor output guide for FTPS examples and Opta testing.
+- First-pass FTPS implementation for Explicit TLS, protected passive upload, and protected passive download.
+- `src/FtpsTrust.cpp` with fingerprint normalization/comparison and PEM validation helpers.
+- `examples/FileZillaLiveTest/FileZillaLiveTest.ino` for first live Opta-to-FileZilla validation.
+- `examples/WebHarnessLiveTest/WebHarnessLiveTest.ino` with a lightweight Opta-hosted LAN UI for FTPS config input, action triggering, and live status/log monitoring.
+- `CODE REVIEW/WEB_HARNESS_API_REFERENCE_04152026.md` documenting harness auth flow, endpoint contracts, and ready-to-run PowerShell/cURL examples for scripted testing.
 
 ### Changed
 - Updated README status language to reflect scaffold-present, implementation-pending reality.
@@ -15,3 +21,19 @@ All notable changes to this project will be documented in this file.
 - Updated implementation checklist semantics for existing examples and `quit()`-based cleanup expectations.
 - Updated repository review transport interface signatures and file-path references to match current `src/transport/` scaffolding.
 - Updated spike-plan sample text to use `MbedSecureSocketFtpsTransport` naming and current test directory path conventions.
+- Tightened `FtpsServerConfig` to the currently supported v1 surface by removing unsupported public security and passive-mode toggles.
+- Replaced scaffold `FtpsClient` behavior with an initial Explicit FTPS implementation using `TCPSocket` and `TLSSocketWrapper`.
+- Wired transport diagnostics to expose peer certificate fingerprints and TLS error codes.
+- Converted the upload/download examples from scaffold messaging to working FTPS examples with structured serial diagnostics.
+- Updated the README and serial monitor guide to describe the implemented state and the new FileZilla live-test path.
+- Hardened `FtpsClient` command/transfer reliability with truncation checks, would-block-aware I/O retries, PASV parser range validation, and control-reply draining on transfer-failure paths.
+- Changed `FtpsClient` connection config handling to use owned internal string storage instead of shallow pointer copies from caller-owned buffers.
+- Added stricter FTPS security behavior in `connect()`: non-zero port requirement, explicit trust-mode validation, and fail-closed enforcement for `validateServerCert`.
+- Improved TLS failure mapping for data-channel setup to surface `SessionReuseRequired` when the data handshake fails with `NSAPI_ERROR_AUTH_FAILURE`.
+- Updated example sketches to report `quit()` status using `lastError()` consistently.
+- Updated README trust-model wording to reflect required certificate validation in the current build.
+- Strengthened `ftpsTrustValidatePem()` by adding Mbed TLS X.509 parsing so malformed PEM content is rejected before handshake time.
+- Added best-effort TLS session reuse hinting in `MbedSecureSocketFtpsTransport` by caching the control-channel TLS session and applying it to data-channel handshakes when available.
+- Reduced transport heap churn by reusing allocated `TCPSocket` instances across reconnects/transfers instead of deleting and reallocating on every close.
+- Added an Mbed TLS 3.x compatibility guard for peer-certificate fingerprint extraction paths.
+- Enhanced `WebHarnessLiveTest` to use POST for config updates, add a lightweight passcode/token auth gate for protected routes, and expose a downloadable text report endpoint for run logs and status snapshots.
