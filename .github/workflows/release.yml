@@ -1,0 +1,34 @@
+name: Release Library ZIP
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from library.properties
+        id: version
+        run: |
+          VERSION=$(grep '^version=' library.properties | cut -d= -f2)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build library ZIP
+        run: |
+          LIB_NAME="ArduinoOPTA-FTPS"
+          mkdir -p "$LIB_NAME"
+          cp -r src examples library.properties LICENSE README.md CHANGELOG.md "$LIB_NAME/"
+          zip -r "${LIB_NAME}-${{ steps.version.outputs.version }}.zip" "$LIB_NAME"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ArduinoOPTA-FTPS-${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true
