@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - New `PyftpdlibLiveTest` example: end-to-end FTPS test against a bundled pyftpdlib server, including `gen_cert.py` and `ftps_server.py` scripts.
+- New `WDMyCloudLiveTest` example: end-to-end FTPS test against a WD My Cloud NAS running My Cloud OS 5, with step-by-step NAS setup guide.
 
 ### Changed
 - Updated README to reflect hardware-validated status (all 10 test steps pass on real Opta).

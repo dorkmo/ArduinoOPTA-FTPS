@@ -193,10 +193,11 @@ The repository currently includes:
 - `examples/BasicDownload/BasicDownload.ino`
 - `examples/FileZillaLiveTest/FileZillaLiveTest.ino`
 - `examples/PyftpdlibLiveTest/PyftpdlibLiveTest.ino`
+- `examples/WDMyCloudLiveTest/WDMyCloudLiveTest.ino`
 - `examples/WebHarnessLiveTest/WebHarnessLiveTest.ino`
 - `FtpsSpikeTest/FtpsSpikeTest.ino`
 
-The upload/download examples and the FileZilla live-test sketch emit structured serial diagnostics so Opta-side runs are easy to inspect in the serial monitor. The **PyftpdlibLiveTest** example bundles a self-contained Python FTPS server (`ftps_server.py`) and certificate generator (`gen_cert.py`) so you can test the library without installing any third-party server software — just `pip install pyftpdlib pyOpenSSL` and run the scripts. The web harness sketch hosts a lightweight LAN page for updating FTPS settings and running small connect/upload/download/quit tests without reflashing, uses token-gated actions behind a small passcode unlock step, and supports downloadable plain-text test reports.
+The upload/download examples and the FileZilla live-test sketch emit structured serial diagnostics so Opta-side runs are easy to inspect in the serial monitor. The **PyftpdlibLiveTest** example bundles a self-contained Python FTPS server (`ftps_server.py`) and certificate generator (`gen_cert.py`) so you can test the library without installing any third-party server software — just `pip install pyftpdlib pyOpenSSL` and run the scripts. The **WDMyCloudLiveTest** example targets WD My Cloud NAS devices running My Cloud OS 5 and includes a [setup guide](examples/WDMyCloudLiveTest/README.md) for enabling FTPS on the NAS and extracting the certificate fingerprint. The web harness sketch hosts a lightweight LAN page for updating FTPS settings and running small connect/upload/download/quit tests without reflashing, uses token-gated actions behind a small passcode unlock step, and supports downloadable plain-text test reports.
 
 Planned follow-up examples after broader transport/client validation lands:
 
