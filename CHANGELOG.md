@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-04-16
+
+### Fixed
+- Data and control socket lifecycle: `closeData()` and `closeControl()` now delete both the TLS wrapper and the underlying `TCPSocket`, preventing a hard fault on Mbed OS when a closed socket was reused for a subsequent transfer or reconnect.
+- TLS close blocking: data and control TLS sockets are given a 3-second timeout before `close()` to prevent indefinite hangs during the TLS shutdown handshake.
+
+### Changed
+- Moved trace callback responsibility entirely to `FtpsClient`; removed transport-layer trace phases to keep diagnostic output clean and high-level.
+- Cleaned up minor indentation inconsistencies in `FtpsClient.cpp`.
+
 ### Added
 - Initial repository structure with design documents.
 - Phase 0 transport spike plan.

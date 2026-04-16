@@ -6,12 +6,12 @@
 #ifndef FTPS_CLIENT_H
 #define FTPS_CLIENT_H
 
+#include "transport/IFtpsTransport.h"
 #include "FtpsTypes.h"
 #include "FtpsErrors.h"
 
 #include <stddef.h>
 
-class IFtpsTransport;
 class NetworkInterface;
 
 /// Arduino-style FTPS client.
@@ -31,6 +31,12 @@ public:
 
   /// Connect to the FTPS server described by config.
   bool connect(const FtpsServerConfig &config, char *error, size_t errorSize);
+
+  /// Register an optional trace callback for diagnostic phase updates.
+  void setTraceCallback(FtpsTraceCallback callback);
+
+  /// Return the last internal phase reached by the client.
+  const char *lastPhase() const;
 
   /// Create a remote directory via MKD.
   bool mkd(const char *remoteDir, char *error, size_t errorSize);
@@ -70,6 +76,10 @@ private:
   char _normalizedFingerprint[65] = {};
   bool _connected = false;
   FtpsError _lastError = FtpsError::None;
+  FtpsTraceCallback _traceCallback = nullptr;
+  const char *_lastPhase = "idle";
+
+  void tracePhase(const char *phase);
 };
 
 #endif // FTPS_CLIENT_H

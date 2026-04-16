@@ -26,6 +26,8 @@ struct FtpTlsConfig {
   bool validateServerCert = true;
 };
 
+typedef void (*FtpsTraceCallback)(const char *phase);
+
 class IFtpsTransport {
 public:
   virtual ~IFtpsTransport() = default;

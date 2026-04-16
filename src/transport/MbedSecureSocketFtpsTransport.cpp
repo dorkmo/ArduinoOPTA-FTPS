@@ -404,6 +404,7 @@ bool MbedSecureSocketFtpsTransport::dataConnected() {
 
 void MbedSecureSocketFtpsTransport::closeData() {
 	if (_dataTls != nullptr) {
+		_dataTls->set_timeout(3000);
 		_dataTls->close();
 		delete _dataTls;
 		_dataTls = nullptr;
@@ -411,6 +412,8 @@ void MbedSecureSocketFtpsTransport::closeData() {
 
 	if (_dataSocket != nullptr) {
 		_dataSocket->close();
+		delete _dataSocket;
+		_dataSocket = nullptr;
 	}
 
 	_dataConnected = false;
@@ -418,6 +421,7 @@ void MbedSecureSocketFtpsTransport::closeData() {
 
 void MbedSecureSocketFtpsTransport::closeControl() {
 	if (_controlTls != nullptr) {
+		_controlTls->set_timeout(3000);
 		_controlTls->close();
 		delete _controlTls;
 		_controlTls = nullptr;
@@ -425,6 +429,8 @@ void MbedSecureSocketFtpsTransport::closeControl() {
 
 	if (_controlSocket != nullptr) {
 		_controlSocket->close();
+		delete _controlSocket;
+		_controlSocket = nullptr;
 	}
 
 	_controlConnected = false;
