@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -27,8 +28,49 @@ jobs:
           cp -r src examples library.properties LICENSE README.md CHANGELOG.md "$LIB_NAME/"
           zip -r "${LIB_NAME}-${{ steps.version.outputs.version }}.zip" "$LIB_NAME"
 
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v1
+
+      - name: Checkout TankAlarm sketch sources
+        uses: actions/checkout@v4
+        with:
+          repository: SenaxInc/ArduinoSMSTankAlarm
+          path: tankalarm
+
+      - name: Install Arduino Opta core
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:mbed_opta
+
+      - name: Install FTPS test sketch dependencies
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "Ethernet"
+          arduino-cli lib install "ArduinoJson"
+          arduino-cli lib install "Blues Wireless Notecard"
+          arduino-cli lib install "ArduinoRS485"
+          arduino-cli lib install "ArduinoModbus"
+
+      - name: Build FTPS test firmware
+        run: |
+          LIB_ROOT="$RUNNER_TEMP/arduino-libraries"
+          mkdir -p "$LIB_ROOT/ArduinoOPTA-FTPS" "$LIB_ROOT/TankAlarm-112025-Common" build/ftps-test
+          cp -r src library.properties "$LIB_ROOT/ArduinoOPTA-FTPS/"
+          cp -r tankalarm/TankAlarm-112025-Common/src tankalarm/TankAlarm-112025-Common/library.properties "$LIB_ROOT/TankAlarm-112025-Common/"
+
+          arduino-cli compile --fqbn arduino:mbed_opta:opta \
+            --libraries "$LIB_ROOT" \
+            --output-dir build/ftps-test \
+            "$GITHUB_WORKSPACE/tankalarm/TankAlarm-112025-FTPS_Server_Test/TankAlarm-112025-FTPS_Server_Test.ino"
+
+          BIN_SOURCE=$(find build/ftps-test -maxdepth 1 -name '*.bin' ! -name '*.with_bootloader.bin' ! -name '*.bootloader.bin' | head -n1)
+          test -n "$BIN_SOURCE"
+          cp "$BIN_SOURCE" "TankAlarm-112025-FTPS_Server_Test-v${{ steps.version.outputs.version }}.bin"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ArduinoOPTA-FTPS-${{ steps.version.outputs.version }}.zip
+          files: |
+            ArduinoOPTA-FTPS-${{ steps.version.outputs.version }}.zip
+            TankAlarm-112025-FTPS_Server_Test-v${{ steps.version.outputs.version }}.bin
           generate_release_notes: true
