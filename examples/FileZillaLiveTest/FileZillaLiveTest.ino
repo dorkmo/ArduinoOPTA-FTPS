@@ -49,9 +49,22 @@ static const bool RUN_UPLOAD_TEST = true;
 static const bool RUN_SIZE_TEST = true;
 static const bool RUN_DOWNLOAD_TEST = true;
 
+// Set to true to use a static IP instead of DHCP.
+// DHCP may hang on some Opta boards; static IP is more reliable.
+static const bool USE_STATIC_IP = false;
+static const IPAddress STATIC_IP(192, 168, 1, 50);
+static const IPAddress STATIC_DNS(192, 168, 1, 1);
+static const IPAddress STATIC_GATEWAY(192, 168, 1, 1);
+static const IPAddress STATIC_SUBNET(255, 255, 255, 0);
+
 // ============================================================================
 // Helpers
 // ============================================================================
+
+static void ftpsTraceCallback(const char *phase) {
+  Serial.print("[FTPS] ");
+  Serial.println(phase);
+}
 
 static void printClientFailure(const char *step, FtpsClient &ftps, const char *error) {
   Serial.print("[FAIL] ");
@@ -115,14 +128,19 @@ void setup() {
   Serial.println("[STEP] Ethernet initialization");
   byte mac[6];
   Ethernet.MACAddress(mac);
-  if (Ethernet.begin(mac) == 0) {
-    Serial.println("[FAIL] Ethernet.begin(): DHCP failed.");
-    return;
+  if (USE_STATIC_IP) {
+    Ethernet.begin(mac, STATIC_IP, STATIC_DNS, STATIC_GATEWAY, STATIC_SUBNET);
+  } else {
+    if (Ethernet.begin(mac) == 0) {
+      Serial.println("[FAIL] Ethernet.begin(): DHCP failed.");
+      return;
+    }
   }
   Serial.print("[PASS] Ethernet.begin(): ");
   Serial.println(Ethernet.localIP());
 
   FtpsClient ftps;
+  ftps.setTraceCallback(ftpsTraceCallback);
   char error[192] = {};
 
   Serial.println("[STEP] FtpsClient.begin()");

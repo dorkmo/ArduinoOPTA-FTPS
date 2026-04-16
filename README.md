@@ -4,8 +4,8 @@ ArduinoOPTA-FTPS is an experimental repository for a general-purpose FTPS client
 
 The goal is to provide a reusable, Opta-first FTPS library built on the board's Ethernet and Mbed networking stack, with initial validation targeted against a WD My Cloud PR4100, vsftpd, and FileZilla Server, and designed to support other standards-compliant FTPS servers over time.
 
-> [!IMPORTANT]
-> This repository now includes an initial Explicit FTPS implementation built on the Opta Mbed networking stack. Treat it as experimental until it has been validated on real Opta hardware against the target servers in your environment.
+> [!NOTE]
+> This library has been validated on real Arduino Opta hardware with all core operations (connect, mkdir, upload, size, download, quit) passing against a pyftpdlib FTPS server. Treat it as early-release — broader server interoperability testing is still in progress.
 
 ## Project Goals
 
@@ -138,21 +138,42 @@ if (client.connect(config, error, sizeof(error))) {
 }
 ```
 
-The public API surface is `begin()`, `connect()`, `mkd()`, `size()`, `store()`, `retrieve()`, `quit()`, and `lastError()`. `begin()` initializes the transport layer with the Mbed `NetworkInterface` and must be called once before `connect()`. `lastError()` returns an `FtpsError` enum for programmatic error handling alongside the human-readable `char*` error buffer.
-
-`mkd()` and `size()` have been added for broader host-application integration, but they still need on-device validation across the reference servers before they should be treated as release-ready.
+The public API surface is `begin()`, `connect()`, `setTraceCallback()`, `lastPhase()`, `mkd()`, `size()`, `store()`, `retrieve()`, `quit()`, and `lastError()`. `begin()` initializes the transport layer with the Mbed `NetworkInterface` and must be called once before `connect()`. `lastError()` returns an `FtpsError` enum for programmatic error handling alongside the human-readable `char*` error buffer. `setTraceCallback()` registers an optional callback invoked at each protocol phase for diagnostics or watchdog integration.
 
 The v1 public config intentionally does not expose `securityMode` or `passiveMode` toggles. Until additional modes are implemented, the library surface is fixed to Explicit FTPS plus protected passive transfers so sketches cannot accidentally rely on unsupported options.
 
+## Hardware Notes
+
+**Static IP vs DHCP:** On some Opta boards and network configurations, `Ethernet.begin(mac)` (DHCP) can hang or take a very long time. If your sketch appears stuck at Ethernet init, use a static IP instead:
+
+```cpp
+IPAddress ip(192, 168, 1, 50);
+IPAddress dns(192, 168, 1, 1);
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 255, 0);
+Ethernet.begin(mac, ip, dns, gateway, subnet);
+```
+
+**Watchdog and long operations:** TLS handshakes on the Opta can take several seconds each. If your application uses a hardware watchdog, kick it from the trace callback to prevent resets during connect/transfer:
+
+```cpp
+#include <mbed.h>
+
+static void ftpsTraceCallback(const char *phase) {
+  Watchdog::get_instance().kick();
+  Serial.print("[FTPS] ");
+  Serial.println(phase);
+}
+
+ftps.setTraceCallback(ftpsTraceCallback);
+```
+
 ## Near-Term Integration Requirements
 
-For general Arduino applications that need multi-file backup, restore, manifest, or archive workflows on top of this library, the next required items are:
+For general Arduino applications that need multi-file backup, restore, manifest, or archive workflows on top of this library, the next items are:
 
-- on-device validation of `mkd()` support so host applications can create nested remote paths without manual server pre-seeding
-- on-device validation of `size()` support so variable-size downloads can be preflighted before `RETR`
-- at least one live example or harness path that exercises directory creation and remote-size preflight on-device
+- broader server interoperability testing (FileZilla Server, vsftpd, WD My Cloud PR4100)
 - documentation for buffer-owned transfer semantics, variable-size download guidance, and the provisional one-client-at-a-time assumption
-- a hardware-based decision on whether `noop()` or a watchdog callback is actually needed for longer multi-step workflows
 - streaming transfer APIs only if measured payload sizes exceed safe RAM ceilings for the supported Opta target
 
 These requirements are tracked as integration follow-up work, not as product-specific behavior inside the library.
@@ -186,32 +207,30 @@ Planned follow-up examples after broader transport/client validation lands:
 
 ## Current Status
 
-This repository currently contains planning docs plus a first-pass implementation:
+The library has been validated on real Arduino Opta hardware (v0.1.0):
 
-- Architecture and implementation notes
-- An execution checklist for the FTPS migration
-- A repository bootstrap and extraction plan
-- A Phase 0 transport spike plan for Arduino Opta hardware
-- Library source files in `src/` (`FtpsClient`, `FtpsTypes`, `FtpsErrors`, trust helpers, transport implementation)
-- Upload/download examples, a FileZilla live-test sketch, a web harness live-test sketch, and a full spike sketch
+- All core operations pass: connect, mkd, store, size, retrieve, quit
+- SHA-256 fingerprint pinning verified on-device
+- TLS session reuse hinting implemented for data-channel handshakes
+- Socket lifecycle hardened (delete after close) to prevent Mbed OS hard faults
+- TLS close timeouts prevent indefinite hangs during shutdown
+- Trace callback support for diagnostics and watchdog integration
 
-Before a first experimental release, the project still needs:
+Remaining work:
 
-1. Real Opta hardware validation against FileZilla Server and the other reference servers
-2. Protected passive data-channel interoperability checks, especially around TLS session reuse behavior
-3. On-device fingerprint and imported-certificate validation runs
-4. Integration-helper validation for nested remote paths and variable-size download preflight
-5. A hardware-based decision on whether `NOOP`, watchdog hooks, or streaming transfer support are needed for larger application workflows
-6. Example compile validation and release hardening
+1. Broader server interoperability testing (FileZilla Server, vsftpd, WD My Cloud PR4100)
+2. Imported PEM certificate trust validation on hardware
+3. Example compile validation and release hardening
 
 ## Limitations
 
-- Experimental repository; no released library yet
-- Arduino Opta is the only planned supported board for v1
+- Arduino Opta is the only supported board for v1
 - Explicit FTPS only
 - Passive mode only
-- Compatibility beyond the three reference servers is not yet claimed
-- Servers that enforce unsupported TLS session reuse behavior may require additional transport work
+- Buffer-based transfers only (no streaming API yet)
+- Compatibility beyond pyftpdlib is not yet validated on hardware
+- Servers that enforce strict TLS session reuse may require additional transport work
+- DHCP may hang on some Opta/network configurations; static IP is recommended
 
 ## Project Documentation
 

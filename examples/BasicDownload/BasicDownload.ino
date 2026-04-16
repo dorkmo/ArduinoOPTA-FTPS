@@ -17,6 +17,14 @@ static const char *FTP_PASS = "ftppass";
 // SHA-256 fingerprint of the server's leaf certificate (64 hex chars, no separators)
 static const char *SERVER_FINGERPRINT = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+// Set to true to use a static IP instead of DHCP.
+// DHCP may hang on some Opta boards; static IP is more reliable.
+static const bool USE_STATIC_IP = false;
+static const IPAddress STATIC_IP(192, 168, 1, 50);
+static const IPAddress STATIC_DNS(192, 168, 1, 1);
+static const IPAddress STATIC_GATEWAY(192, 168, 1, 1);
+static const IPAddress STATIC_SUBNET(255, 255, 255, 0);
+
 static void printClientFailure(const char *step, FtpsClient &ftps, const char *error) {
   Serial.print("[FAIL] ");
   Serial.print(step);
@@ -42,9 +50,13 @@ void setup() {
   Serial.println("[STEP] Ethernet initialization");
   byte mac[6];
   Ethernet.MACAddress(mac);
-  if (Ethernet.begin(mac) == 0) {
-    Serial.println("[FAIL] Ethernet.begin(): DHCP failed.");
-    return;
+  if (USE_STATIC_IP) {
+    Ethernet.begin(mac, STATIC_IP, STATIC_DNS, STATIC_GATEWAY, STATIC_SUBNET);
+  } else {
+    if (Ethernet.begin(mac) == 0) {
+      Serial.println("[FAIL] Ethernet.begin(): DHCP failed.");
+      return;
+    }
   }
   Serial.print("[INFO] IP address: ");
   Serial.println(Ethernet.localIP());

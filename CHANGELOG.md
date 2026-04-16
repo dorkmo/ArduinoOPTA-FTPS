@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Updated README to reflect hardware-validated status (all 10 test steps pass on real Opta).
+- Added static IP configuration option to BasicUpload, BasicDownload, and FileZillaLiveTest examples.
+- Added trace callback to FileZillaLiveTest for diagnostic output and watchdog integration.
+- Documented static IP and watchdog patterns in README Hardware Notes section.
+
 ## [0.1.0] - 2026-04-16
 
 ### Fixed
