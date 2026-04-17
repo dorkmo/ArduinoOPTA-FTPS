@@ -26,6 +26,8 @@ public:
   bool ctrlConnected() override;
 
   bool openProtectedDataChannel(const FtpEndpoint &ep, const FtpTlsConfig &tls, char *error, size_t errorSize) override;
+    bool openDataChannel(const FtpEndpoint &ep, char *error, size_t errorSize) override;
+    bool upgradeDataToTls(const FtpTlsConfig &tls, char *error, size_t errorSize) override;
   int dataRead(uint8_t *buf, size_t len) override;
   int dataWrite(const uint8_t *buf, size_t len) override;
   bool dataConnected() override;

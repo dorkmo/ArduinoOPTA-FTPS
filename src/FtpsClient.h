@@ -14,6 +14,11 @@
 
 class NetworkInterface;
 
+// Optional hook invoked during internal FTPS I/O wait loops.
+// Sketches can set this to service watchdogs while transfers are active.
+typedef void (*FtpsProgressCallback)();
+void setFtpsClientProgressHook(FtpsProgressCallback hook);
+
 /// Arduino-style FTPS client.
 /// Owns its transport internally; callers only interact with this class.
 class FtpsClient {
@@ -53,6 +58,10 @@ public:
   bool retrieve(const char *remotePath, uint8_t *buffer, size_t bufferSize,
                 size_t &bytesRead, char *error, size_t errorSize);
 
+  /// Diagnostic: Test if control connection is still alive (sends NOOP).
+  /// Returns true if control channel responds, false if dead.
+  bool isControlAlive(char *error, size_t errorSize);
+
   /// Send QUIT and close all sockets.
   void quit();
 
@@ -80,6 +89,10 @@ private:
   const char *_lastPhase = "idle";
 
   void tracePhase(const char *phase);
+  bool failAndDisconnect(FtpsError code,
+                         char *error,
+                         size_t errorSize,
+                         const char *message);
 };
 
 #endif // FTPS_CLIENT_H

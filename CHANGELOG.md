@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **FTPS backup hang / watchdog reset on Arduino Opta (Mbed OS)**
+  `MbedSecureSocketFtpsTransport::closeData()` and `closeControl()` previously
+  routed through Mbed's synchronous `TLSSocketWrapper::close()` +
+  `TCPSocket::close()` path, which does NOT honor `set_timeout()` or
+  `set_blocking(false)` during the TLS `close_notify` + TCP `FIN` exchange.
+  On some FTPS servers this blocked 60+ seconds, tripping the caller's
+  watchdog and rebooting the device. The close path is now:
+
+  1. Flip the underlying `TCPSocket` to non-blocking with zero timeout.
+  2. Send TLS `close_notify` directly via
+     `mbedtls_ssl_close_notify(tls->get_ssl_context())`. This lets the
+     server recognize graceful shutdown and emit its final `226 Transfer
+     complete` reply promptly, without invoking Mbed's blocking close
+     path.
+  3. Abandon the heap objects (no `delete`, no `close()`). Both were
+     observed to hang the device on Mbed OS 4.5.0; the heap cost is
+     bounded to ~4 KB per transfer and clears on reboot.
+
+  Live verification on an Arduino Opta (mbed_opta core 4.5.0):
+  - Backup now returns `HTTP 200` in ~8-30 s (was hanging 60-90 s →
+    watchdog reboot).
+  - The `STOR` final-reply round-trip collapsed from ~15.4 s → ~370 ms
+    because the server no longer waits for its own `close_notify`
+    timeout before sending `226`.
+  - Device remains alive across backup cycles; no watchdog resets.
+
+  **Known limitation:** the abandon strategy leaks one LWIP socket handle
+  per transfer. The first file of a backup succeeds; subsequent files
+  in the same run fail with `ConnectionFailed` until the device is
+  rebooted. Two follow-up approaches have been evaluated and both
+  trigger device hangs on current Mbed OS 4.5.0:
+  - `delete tls; delete tcp` — TLSSocketWrapper's destructor internally
+    re-invokes the blocking close path.
+  - `tcp->close()` only — LWIP close path blocks when the TLS wrapper
+    still holds BIO callbacks into the TCP socket.
+
+  A proper multi-file fix (candidates: pre-allocate and reuse a single
+  `TCPSocket` across PASV cycles, or reconnect the control channel per
+  file) is tracked as follow-up work.
+
 ### Added
 - New `PyftpdlibLiveTest` example: end-to-end FTPS test against a bundled pyftpdlib server, including `gen_cert.py` and `ftps_server.py` scripts.
 - New `WDMyCloudLiveTest` example: end-to-end FTPS test against a WD My Cloud NAS running My Cloud OS 5, with step-by-step NAS setup guide.
@@ -13,6 +54,12 @@ All notable changes to this project will be documented in this file.
 - Added static IP configuration option to BasicUpload, BasicDownload, and FileZillaLiveTest examples.
 - Added trace callback to FileZillaLiveTest for diagnostic output and watchdog integration.
 - Documented static IP and watchdog patterns in README Hardware Notes section.
+
+## [0.1.1] - 2026-04-16
+
+### Fixed
+- Improved control-channel resilience in `FtpsClient` command/reply paths (`PASV`, `STOR`, `RETR`, `MKD`, `SIZE`): when command dispatch or reply read fails, the client now closes sockets and marks the session disconnected immediately instead of leaving stale connected state.
+- Prevented follow-on transfer attempts from running against a dead FTPS control channel by failing fast with `ConnectionFailed` after control link loss.
 
 ## [0.1.0] - 2026-04-16
 

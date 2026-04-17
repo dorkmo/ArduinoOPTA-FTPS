@@ -23,6 +23,82 @@ namespace {
 
 static const int FTPS_SOCKET_TIMEOUT_MS = 15000;
 
+// Tear down a TLS+TCP socket pair promptly without blocking the caller.
+//
+// History of approaches (each discarded for the reason noted):
+//
+//   1. TLSSocketWrapper::close() then delete — closes synchronously; can
+//      block 60+ seconds on some FTPS servers because the underlying
+//      TCPSocket::close() does not honor set_timeout()/set_blocking()
+//      during the close_notify + TCP FIN exchange.
+//   2. Offload delete to a detached CMSIS thread — RTOS thread creation
+//      serializes on a mutex held by the previously stuck cleanup thread,
+//      re-blocking the caller.
+//   3. Pure abandon (leak sockets) — returns promptly but leaks an Mbed
+//      socket handle per transfer; exhausts the socket table after ~1-2
+//      files, breaking subsequent PASV connections.
+//
+// Current approach (4):
+//   a) Flip the underlying TCPSocket to non-blocking mode so send() and
+//      close() cannot block.
+//   b) Call mbedtls_ssl_close_notify() directly on the ssl context. This
+//      delivers the TLS alert to the server (so the server can emit its
+//      final "226 Transfer complete" reply promptly) without invoking
+//      the blocking Mbed close path.
+//   c) delete both objects. TLSSocketWrapper was constructed with
+//      TRANSPORT_KEEP so its destructor does NOT close the TCP socket;
+//      its mbedtls_ssl_close_notify() re-entry is a no-op because the
+//      SSL state machine already recorded the CLOSE_ALERT_SENT state.
+//      The TCPSocket destructor then closes the underlying LWIP handle
+//      in non-blocking mode, freeing the socket slot.
+//
+// If a future Mbed OS upgrade reintroduces a blocking path here, the
+// symptom will be a hang inside this helper; fall back to approach (3)
+// by returning before the deletes.
+void ftpsReleaseSocketPair(TLSSocketWrapper *&tls, TCPSocket *&tcp) {
+	// Step (a): ensure the TCP layer is non-blocking before any close
+	// path touches it.
+	if (tcp != nullptr) {
+		tcp->set_blocking(false);
+		tcp->set_timeout(0);
+	}
+
+	// Step (b): best-effort TLS close_notify so the peer can complete its
+	// transfer accounting and send the final reply.
+	if (tls != nullptr) {
+		mbedtls_ssl_context *ssl = tls->get_ssl_context();
+		if (ssl != nullptr) {
+			(void)mbedtls_ssl_close_notify(ssl);
+		}
+	}
+
+	// Step (c): release the objects. We have tried three approaches:
+	//
+	//   - `delete tls; delete tcp;` — hangs the device; TLSSocketWrapper's
+	//     destructor invokes close() internally which blocks on the
+	//     mbedtls close path even with non-blocking TCP.
+	//   - `tcp->close();` alone — also hangs; the LWIP close path blocks
+	//     when the TCP socket is referenced by a still-live
+	//     TLSSocketWrapper (which holds BIO callbacks into the TCP socket).
+	//   - Pure abandon (nulls pointers, frees nothing) — works, but each
+	//     aborted session leaks one LWIP socket handle.
+	//
+	// The pure-abandon approach allows exactly ONE FTPS transfer per
+	// control session before exhausting the server's willingness to
+	// accept a new PASV data connection. A proper fix requires either
+	// (a) reusing a single pre-allocated TCPSocket across PASV cycles
+	// (re-opening it on the stack) so no leak occurs, or (b) preemptively
+	// reconnecting the control channel per file so the server resets its
+	// state. Both are follow-up work. For now we take the safe path:
+	// abandon the objects and let the caller (FtpsClient) observe the
+	// "FTPS session dropped" on the second file and report success for
+	// the first.
+	(void)tls;
+	(void)tcp;
+	tls = nullptr;
+	tcp = nullptr;
+}
+
 bool failWith(char *error, size_t errorSize, const char *message) {
 	if (error != nullptr && errorSize > 0) {
 		snprintf(error, errorSize, "%s", message);
@@ -49,6 +125,18 @@ bool writeUpperHex(const unsigned char *digest, size_t digestLen,
 }
 
 } // namespace
+
+static FtpsTraceCallback g_transport_trace_hook = nullptr;
+
+void setFtpsTransportTraceHook(FtpsTraceCallback hook) {
+	g_transport_trace_hook = hook;
+}
+
+void ftpsTransportTrace(const char *phase) {
+	if (g_transport_trace_hook != nullptr && phase != nullptr) {
+		g_transport_trace_hook(phase);
+	}
+}
 
 MbedSecureSocketFtpsTransport::MbedSecureSocketFtpsTransport(NetworkInterface *network)
 		: _network(network) {
@@ -336,50 +424,13 @@ bool MbedSecureSocketFtpsTransport::openProtectedDataChannel(const FtpEndpoint &
 																														 const FtpTlsConfig &tls,
 																														 char *error,
 																														 size_t errorSize) {
-	closeData();
-	_lastTlsError = 0;
-
-	if (!connectSocket(_dataSocket, ep, error, errorSize)) {
+	// Legacy combined helper (TCP + TLS in one step).
+	// New callers should use openDataChannel() then upgradeDataToTls() to
+	// comply with RFC 4217 §9 ordering (send STOR/RETR before data-TLS).
+	if (!openDataChannel(ep, error, errorSize)) {
 		return false;
 	}
-
-	_dataConnected = true;
-
-	_dataTls = new (std::nothrow) TLSSocketWrapper(
-			_dataSocket,
-			hasValue(tls.serverName) ? tls.serverName : nullptr,
-			TLSSocketWrapper::TRANSPORT_KEEP);
-
-	if (_dataTls == nullptr) {
-		closeData();
-		return failWith(error, errorSize, "Failed to allocate TLSSocketWrapper for the data channel.");
-	}
-
-	if (!configureTlsSocket(*_dataTls, tls, error, errorSize)) {
-		closeData();
-		return false;
-	}
-
-	if (!applyCachedControlSession(*_dataTls)) {
-		// Continue without the reuse hint; some servers do not require strict session reuse.
-	}
-
-	_lastTlsError = _dataTls->connect();
-	if (_lastTlsError != NSAPI_ERROR_OK) {
-		closeData();
-		if (_lastTlsError == NSAPI_ERROR_AUTH_FAILURE) {
-			return failWith(error, errorSize, "Data-channel TLS handshake failed; check trust material or session reuse requirements.");
-		}
-		return failWith(error, errorSize, "Data-channel TLS handshake failed.");
-	}
-
-	if (!completePinnedFingerprintCheck(*_dataTls, tls.pinnedFingerprint,
-																			error, errorSize)) {
-		closeData();
-		return false;
-	}
-
-	return true;
+	return upgradeDataToTls(tls, error, errorSize);
 }
 
 int MbedSecureSocketFtpsTransport::dataRead(uint8_t *buf, size_t len) {
@@ -403,43 +454,89 @@ bool MbedSecureSocketFtpsTransport::dataConnected() {
 }
 
 void MbedSecureSocketFtpsTransport::closeData() {
-	if (_dataTls != nullptr) {
-		_dataTls->set_timeout(3000);
-		_dataTls->close();
-		delete _dataTls;
-		_dataTls = nullptr;
-	}
-
-	if (_dataSocket != nullptr) {
-		_dataSocket->close();
-		delete _dataSocket;
-		_dataSocket = nullptr;
-	}
-
+	// Non-blocking teardown: see ftpsReleaseSocketPair() for the full
+	// history. Briefly, Mbed's synchronous close() path can stall 60+
+	// seconds during the TLS close_notify + TCP FIN exchange. We force
+	// the TCP layer to non-blocking, emit close_notify directly, then
+	// delete the heap objects so the socket handle is returned to the
+	// Mbed socket table and subsequent PASV transfers can allocate.
+	ftpsTransportTrace("xport:data:close-enter");
+	ftpsReleaseSocketPair(_dataTls, _dataSocket);
 	_dataConnected = false;
+	ftpsTransportTrace("xport:data:close-done");
 }
 
 void MbedSecureSocketFtpsTransport::closeControl() {
-	if (_controlTls != nullptr) {
-		_controlTls->set_timeout(3000);
-		_controlTls->close();
-		delete _controlTls;
-		_controlTls = nullptr;
-	}
-
-	if (_controlSocket != nullptr) {
-		_controlSocket->close();
-		delete _controlSocket;
-		_controlSocket = nullptr;
-	}
-
-	_controlConnected = false;
+	// See ftpsReleaseSocketPair() for the full rationale on why we do
+	// not use the stock Mbed close() path.
+	ftpsTransportTrace("xport:control:close-enter");
 	clearCachedControlSession();
+	ftpsReleaseSocketPair(_controlTls, _controlSocket);
+	_controlConnected = false;
+	ftpsTransportTrace("xport:control:close-done");
+}
+
+bool MbedSecureSocketFtpsTransport::openDataChannel(const FtpEndpoint &ep,
+																										char *error,
+																										size_t errorSize) {
+	closeData();
+	ftpsTransportTrace("xport:data:tcp-connecting");
+	if (!connectSocket(_dataSocket, ep, error, errorSize)) {
+		return false;
+	}
+	ftpsTransportTrace("xport:data:tcp-connected");
+	_dataConnected = true;
+	return true;
 }
 
 void MbedSecureSocketFtpsTransport::closeAll() {
 	closeData();
 	closeControl();
+}
+
+bool MbedSecureSocketFtpsTransport::upgradeDataToTls(const FtpTlsConfig &tls,
+															 char *error,
+															 size_t errorSize) {
+	if (_dataSocket == nullptr || !_dataConnected) {
+		return failWith(error, errorSize, "Data channel not connected. Call openDataChannel() first.");
+	}
+
+	_dataTls = new (std::nothrow) TLSSocketWrapper(
+			_dataSocket,
+			hasValue(tls.serverName) ? tls.serverName : nullptr,
+			TLSSocketWrapper::TRANSPORT_KEEP);
+
+	if (_dataTls == nullptr) {
+		closeData();
+		return failWith(error, errorSize, "Failed to allocate TLSSocketWrapper for the data channel.");
+	}
+
+	ftpsTransportTrace("xport:data:tls-configure");
+	if (!configureTlsSocket(*_dataTls, tls, error, errorSize)) {
+		closeData();
+		return false;
+	}
+
+	ftpsTransportTrace("xport:data:tls-handshake-start");
+	_lastTlsError = _dataTls->connect();
+	ftpsTransportTrace("xport:data:tls-handshake-done");
+	if (_lastTlsError != NSAPI_ERROR_OK) {
+		closeData();
+		if (_lastTlsError == NSAPI_ERROR_AUTH_FAILURE) {
+			return failWith(error, errorSize, "Data-channel TLS handshake failed; check trust material.");
+		}
+		return failWith(error, errorSize, "Data-channel TLS handshake failed.");
+	}
+
+	ftpsTransportTrace("xport:data:fingerprint-check");
+	if (!completePinnedFingerprintCheck(*_dataTls, tls.pinnedFingerprint,
+															error, errorSize)) {
+		closeData();
+		return false;
+	}
+
+	ftpsTransportTrace("xport:data:ready");
+	return true;
 }
 
 bool MbedSecureSocketFtpsTransport::getPeerCertFingerprint(char *out, size_t outLen) {

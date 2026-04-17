@@ -18,11 +18,26 @@
 #include <stdio.h>
 #include <string.h>
 
+static FtpsProgressCallback g_ftpsProgressHook = nullptr;
+
+void setFtpsClientProgressHook(FtpsProgressCallback hook) {
+  g_ftpsProgressHook = hook;
+}
+
+static inline void ftpsProgressPulse() {
+  if (g_ftpsProgressHook != nullptr) {
+    g_ftpsProgressHook();
+  }
+}
+
 namespace {
 
 static const uint32_t FTPS_REPLY_TIMEOUT_MS = 15000;
 static const uint32_t FTPS_DATA_IO_TIMEOUT_MS = 15000;
 static const uint32_t FTPS_FINAL_REPLY_DRAIN_TIMEOUT_MS = 5000;
+// Diagnostic: some targets reset while reading final STOR control reply after
+// successful data-channel close. Reconnect-per-file callers can safely skip it.
+static const bool FTPS_SKIP_STORE_FINAL_REPLY_DIAG = false;
 static const size_t FTPS_REPLY_BUFFER_SIZE = 256;
 static const size_t FTPS_COMMAND_BUFFER_SIZE = 192;
 static const size_t FTPS_MAX_PEM_SIZE = 4096;
@@ -89,6 +104,7 @@ bool writeAll(IFtpsTransport &transport,
         : transport.ctrlWrite(data + offset, length - offset);
 
     if (written == NSAPI_ERROR_WOULD_BLOCK) {
+      ftpsProgressPulse();
       if ((millis() - start) >= FTPS_DATA_IO_TIMEOUT_MS) {
         return false;
       }
@@ -243,11 +259,20 @@ int ftpReadResponse(IFtpsTransport &transport,
     uint8_t ch = 0;
     int readResult = transport.ctrlRead(&ch, 1);
     if (readResult == NSAPI_ERROR_WOULD_BLOCK) {
+      ftpsProgressPulse();
       delay(5);
       continue;
     }
 
-    if (readResult <= 0) {
+    // Some TLS stacks can report 0 temporarily before response bytes are ready.
+    // Treat it as "no data yet" and continue waiting until timeout.
+    if (readResult == 0) {
+      ftpsProgressPulse();
+      delay(5);
+      continue;
+    }
+
+    if (readResult < 0) {
       break;
     }
 
@@ -406,6 +431,17 @@ void FtpsClient::tracePhase(const char *phase) {
   }
 }
 
+bool FtpsClient::failAndDisconnect(FtpsError code,
+                                   char *error,
+                                   size_t errorSize,
+                                   const char *message) {
+  if (_transport != nullptr) {
+    _transport->closeAll();
+  }
+  _connected = false;
+  return failWith(_lastError, code, error, errorSize, message);
+}
+
 bool FtpsClient::begin(NetworkInterface *network, char *error, size_t errorSize) {
   clearError(error, errorSize);
 
@@ -470,6 +506,14 @@ bool FtpsClient::mkd(const char *remoteDir, char *error, size_t errorSize) {
                                    sizeof(reply),
                                    error,
                                    errorSize);
+  if (code < 0) {
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending MKD.");
+  }
+
   if (code == 257 || code == 250 || code == 521 ||
       (code == 550 && ftpReplyLooksLikeExistingPath(reply))) {
     _lastError = FtpsError::None;
@@ -517,6 +561,14 @@ bool FtpsClient::size(const char *remotePath,
                                    sizeof(reply),
                                    error,
                                    errorSize);
+  if (code < 0) {
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending SIZE.");
+  }
+
   if (code != 213) {
     return failWith(
         _lastError,
@@ -874,9 +926,12 @@ bool FtpsClient::connect(const FtpsServerConfig &config, char *error, size_t err
 
 bool FtpsClient::store(const char *remotePath, const uint8_t *data, size_t length,
                        char *error, size_t errorSize) {
+  tracePhase("store:entry");
   clearError(error, errorSize);
 
+  tracePhase("store:check-transport");
   if (_transport == nullptr || !_connected) {
+    tracePhase("store:not-connected");
     return failWith(
         _lastError,
         FtpsError::ConnectionFailed,
@@ -885,6 +940,7 @@ bool FtpsClient::store(const char *remotePath, const uint8_t *data, size_t lengt
         "Call connect() before store().");
   }
 
+  tracePhase("store:check-remotepath");
   if (!hasValue(remotePath)) {
     return failWith(
         _lastError,
@@ -894,6 +950,7 @@ bool FtpsClient::store(const char *remotePath, const uint8_t *data, size_t lengt
         "remotePath is required for store().");
   }
 
+  tracePhase("store:check-data");
   if (length > 0 && data == nullptr) {
     return failWith(
         _lastError,
@@ -903,9 +960,18 @@ bool FtpsClient::store(const char *remotePath, const uint8_t *data, size_t lengt
         "data is null but store() length is non-zero.");
   }
 
+  tracePhase("store:alloc-reply");
   char reply[FTPS_REPLY_BUFFER_SIZE] = {};
   tracePhase("store:pasv");
   int code = ftpSendCommand(*_transport, "PASV", reply, sizeof(reply));
+  if (code < 0) {
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending PASV.");
+  }
+
   if (code != 227) {
     return failWith(
         _lastError,
@@ -938,21 +1004,18 @@ bool FtpsClient::store(const char *remotePath, const uint8_t *data, size_t lengt
   tls.validateServerCert = _activeConfig.validateServerCert;
 
   tracePhase("store:data-open");
-  if (!_transport->openProtectedDataChannel(dataEndpoint, tls, error, errorSize)) {
-    int tlsError = _transport->getLastTlsError();
-    FtpsError failure = FtpsError::DataConnectionFailed;
-    if (tlsError != 0) {
-      failure = (tlsError == NSAPI_ERROR_AUTH_FAILURE)
-          ? FtpsError::SessionReuseRequired
-          : FtpsError::DataTlsHandshakeFailed;
-    }
-
+  // RFC 4217 §9: open the TCP data connection first, send the transfer command
+  // over the control channel, then perform the TLS handshake on the data side.
+  // Reversing this order (TLS before STOR) causes servers such as pyftpdlib
+  // to hang because they only wrap the data socket with TLS after they have
+  // accepted the STOR command.
+  if (!_transport->openDataChannel(dataEndpoint, error, errorSize)) {
     return failWith(
         _lastError,
-        failure,
+        FtpsError::DataConnectionFailed,
         error,
         errorSize,
-        hasValue(error) ? error : "Failed to open the protected passive data channel.");
+        hasValue(error) ? error : "Failed to open the passive data TCP connection.");
   }
 
   tracePhase("store:stor");
@@ -963,6 +1026,15 @@ bool FtpsClient::store(const char *remotePath, const uint8_t *data, size_t lengt
                                sizeof(reply),
                                error,
                                errorSize);
+  if (code < 0) {
+    _transport->closeData();
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending STOR.");
+  }
+
   if (code != 125 && code != 150) {
     _transport->closeData();
     return failWith(
@@ -971,6 +1043,22 @@ bool FtpsClient::store(const char *remotePath, const uint8_t *data, size_t lengt
         error,
         errorSize,
         hasValue(reply) ? reply : "STOR was rejected.");
+  }
+
+  // Now upgrade the data connection to TLS (server is ready after sending 125/150).
+  tracePhase("store:data-tls");
+  if (!_transport->upgradeDataToTls(tls, error, errorSize)) {
+    int tlsError = _transport->getLastTlsError();
+    FtpsError failure = (tlsError == NSAPI_ERROR_AUTH_FAILURE)
+        ? FtpsError::SessionReuseRequired
+        : FtpsError::DataTlsHandshakeFailed;
+    drainFinalTransferReply(*_transport);
+    return failWith(
+        _lastError,
+        failure,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Data-channel TLS handshake failed after STOR.");
   }
 
   tracePhase("store:write");
@@ -987,9 +1075,28 @@ bool FtpsClient::store(const char *remotePath, const uint8_t *data, size_t lengt
 
   tracePhase("store:data-close");
   _transport->closeData();
-  tracePhase("store:final-reply");
-  code = ftpReadResponse(*_transport, reply, sizeof(reply));
+  
+  if (FTPS_SKIP_STORE_FINAL_REPLY_DIAG) {
+    tracePhase("store:final-reply-skipped");
+    _lastError = FtpsError::None;
+    return true;
+  }
+
+  tracePhase("store:final-reply-read");
+  code = ftpReadResponse(*_transport, reply, sizeof(reply), FTPS_FINAL_REPLY_DRAIN_TIMEOUT_MS);
+  tracePhase("store:final-reply-got");
+  
+  if (code < 0) {
+    tracePhase("store:final-reply-failed");
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost before final STOR reply.");
+  }
+
   if (code != 226 && code != 250) {
+    tracePhase("store:final-reply-bad-code");
     return failWith(
         _lastError,
         FtpsError::FinalReplyFailed,
@@ -1038,6 +1145,14 @@ bool FtpsClient::retrieve(const char *remotePath, uint8_t *buffer, size_t buffer
   tracePhase("retrieve:pasv");
   char reply[FTPS_REPLY_BUFFER_SIZE] = {};
   int code = ftpSendCommand(*_transport, "PASV", reply, sizeof(reply));
+  if (code < 0) {
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending PASV.");
+  }
+
   if (code != 227) {
     return failWith(
         _lastError,
@@ -1070,21 +1185,14 @@ bool FtpsClient::retrieve(const char *remotePath, uint8_t *buffer, size_t buffer
   tls.validateServerCert = _activeConfig.validateServerCert;
 
   tracePhase("retrieve:data-open");
-  if (!_transport->openProtectedDataChannel(dataEndpoint, tls, error, errorSize)) {
-    int tlsError = _transport->getLastTlsError();
-    FtpsError failure = FtpsError::DataConnectionFailed;
-    if (tlsError != 0) {
-      failure = (tlsError == NSAPI_ERROR_AUTH_FAILURE)
-          ? FtpsError::SessionReuseRequired
-          : FtpsError::DataTlsHandshakeFailed;
-    }
-
+  // RFC 4217 §9: TCP connect first, then send RETR, then upgrade to TLS.
+  if (!_transport->openDataChannel(dataEndpoint, error, errorSize)) {
     return failWith(
         _lastError,
-        failure,
+        FtpsError::DataConnectionFailed,
         error,
         errorSize,
-        hasValue(error) ? error : "Failed to open the protected passive data channel.");
+        hasValue(error) ? error : "Failed to open the passive data TCP connection.");
   }
 
   tracePhase("retrieve:retr");
@@ -1095,6 +1203,15 @@ bool FtpsClient::retrieve(const char *remotePath, uint8_t *buffer, size_t buffer
                                sizeof(reply),
                                error,
                                errorSize);
+  if (code < 0) {
+    _transport->closeData();
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending RETR.");
+  }
+
   if (code != 125 && code != 150) {
     _transport->closeData();
     return failWith(
@@ -1103,6 +1220,21 @@ bool FtpsClient::retrieve(const char *remotePath, uint8_t *buffer, size_t buffer
         error,
         errorSize,
         hasValue(reply) ? reply : "RETR was rejected.");
+  }
+
+  tracePhase("retrieve:data-tls");
+  if (!_transport->upgradeDataToTls(tls, error, errorSize)) {
+    int tlsError = _transport->getLastTlsError();
+    FtpsError failure = (tlsError == NSAPI_ERROR_AUTH_FAILURE)
+        ? FtpsError::SessionReuseRequired
+        : FtpsError::DataTlsHandshakeFailed;
+    drainFinalTransferReply(*_transport);
+    return failWith(
+        _lastError,
+        failure,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Data-channel TLS handshake failed after RETR.");
   }
 
   tracePhase("retrieve:read");
@@ -1121,6 +1253,7 @@ bool FtpsClient::retrieve(const char *remotePath, uint8_t *buffer, size_t buffer
 
     int readResult = _transport->dataRead(buffer + bytesRead, bufferSize - bytesRead);
     if (readResult == NSAPI_ERROR_WOULD_BLOCK) {
+      ftpsProgressPulse();
       if ((millis() - dataReadStart) >= FTPS_DATA_IO_TIMEOUT_MS) {
         _transport->closeData();
         drainFinalTransferReply(*_transport);
@@ -1161,6 +1294,15 @@ bool FtpsClient::retrieve(const char *remotePath, uint8_t *buffer, size_t buffer
   _transport->closeData();
   tracePhase("retrieve:final-reply");
   code = ftpReadResponse(*_transport, reply, sizeof(reply));
+  if (code < 0) {
+    bytesRead = 0;
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost before final RETR reply.");
+  }
+
   if (code != 226 && code != 250) {
     bytesRead = 0;
     return failWith(
@@ -1172,6 +1314,43 @@ bool FtpsClient::retrieve(const char *remotePath, uint8_t *buffer, size_t buffer
   }
 
   tracePhase("retrieve:done");
+  _lastError = FtpsError::None;
+  return true;
+}
+
+bool FtpsClient::isControlAlive(char *error, size_t errorSize) {
+  clearError(error, errorSize);
+
+  if (_transport == nullptr || !_connected) {
+    failWith(_lastError, FtpsError::ConnectionFailed, error, errorSize,
+             "Not connected.");
+    return false;
+  }
+
+  tracePhase("control-check:noop");
+  char reply[FTPS_REPLY_BUFFER_SIZE] = {};
+  int code = ftpSendCommand(*_transport, "NOOP", reply, sizeof(reply));
+  
+  if (code < 0) {
+    // Connection failed during NOOP
+    tracePhase("control-check:failed");
+    failAndDisconnect(FtpsError::ConnectionFailed, error, errorSize,
+                      hasValue(error) ? error : "Control connection failed during NOOP.");
+    return false;
+  }
+
+  if (code != 200) {
+    // Server rejected NOOP (unusual)
+    tracePhase("control-check:rejected");
+    _lastError = FtpsError::TransferFailed;
+    if (error != nullptr && errorSize > 0) {
+      snprintf(error, errorSize, "NOOP rejected with code %d: %s", code,
+               hasValue(reply) ? reply : "unknown");
+    }
+    return false;
+  }
+
+  tracePhase("control-check:ok");
   _lastError = FtpsError::None;
   return true;
 }

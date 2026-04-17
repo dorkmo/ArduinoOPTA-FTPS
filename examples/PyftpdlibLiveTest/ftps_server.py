@@ -73,13 +73,17 @@ def main():
     handler.tls_data_required = True
 
     # Passive mode port range
+    # Mbed TLS clients don't perform TLS session resumption (RFC 5077 tickets),
+    # so disable the session-reuse requirement to avoid 425 rejections.
+    handler.require_ssl_reuse = False
+
     handler.passive_ports = range(pasv_low, pasv_high + 1)
 
     # Banner
     handler.banner = "pyftpdlib FTPS test server ready (ArduinoOPTA-FTPS validation)"
 
     # Enable logging
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
 
     server = FTPServer((args.host, args.port), handler)
     server.max_cons = 5
