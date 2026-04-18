@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-18
+
 ### Added
 - Web file manager hardening in `examples/WebFileManagerLiveTest`:
   safer placeholder FTPS defaults, non-default harness passcode, and
