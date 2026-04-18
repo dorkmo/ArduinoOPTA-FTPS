@@ -4,7 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-18
+
 ### Changed
+- Bumped `library.properties` to `0.2.1` for the first Arduino Library Manager
+  submission-ready tag after the FTPSclientOPTA rename.
+- Updated README installation language to reflect current release/submission
+  status instead of the earlier pre-release wording.
+- Added maintainer email metadata for Library Manager compliance.
+- Removed an accidental top-level `_orig.cpp` file from the repository root.
 - Renamed library metadata `name` to `FTPSclientOPTA` for Arduino Library Manager
   naming compliance (3rd-party libraries must not start with `Arduino`).
 - Updated release packaging workflow artifact and local library folder naming

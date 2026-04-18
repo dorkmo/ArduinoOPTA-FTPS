@@ -1,6 +1,6 @@
 # FTPSclientOPTA
 
-FTPSclientOPTA is an experimental repository for a general-purpose FTPS client library for Arduino Opta devices.
+FTPSclientOPTA is a general-purpose FTPS client library for Arduino Opta devices.
 
 The goal is to provide a reusable, Opta-first FTPS library built on the board's Ethernet and Mbed networking stack, with initial validation targeted against a WD My Cloud PR4100, vsftpd, and FileZilla Server, and designed to support other standards-compliant FTPS servers over time.
 
@@ -76,9 +76,9 @@ When the first implementation lands, the library is expected to rely on:
 
 ## Installation
 
-This repository is not yet published to Arduino Library Manager.
+FTPSclientOPTA is structured for Arduino Library Manager distribution.
 
-For development, it can be used as a local library checkout. The library now contains a first-pass FTPS implementation, but it still needs live Opta validation and interoperability testing before it should be treated as release-ready.
+Until the indexer has picked up the latest tagged release, you can also install it as a local library checkout.
 
 ## Current API Direction
 
@@ -243,7 +243,7 @@ Remaining work:
 
 1. Broader server interoperability testing (FileZilla Server, vsftpd, WD My Cloud PR4100)
 2. Imported PEM certificate trust validation on hardware
-3. Example compile validation and release hardening
+3. Broader example compile validation across the included sketches
 
 ## Limitations
 
