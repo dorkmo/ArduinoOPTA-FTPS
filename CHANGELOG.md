@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-18
+
 ### Changed
 - Decoupled FTPS release automation from external application project sources so
   FTPS releases are packaged and published independently.
