@@ -80,6 +80,15 @@ public:
   /// Return the error code from the last failed operation.
   FtpsError lastError() const;
 
+  /// Return the most recent NSAPI socket-layer error code (e.g. -3005
+  /// NSAPI_ERROR_NO_SOCKET for LWIP pool exhaustion, -3008
+  /// NSAPI_ERROR_CONNECTION_TIMEOUT). Returns 0 if no socket-layer
+  /// failure has been recorded since the last successful socket op.
+  /// Useful for application-level retry policy: a DataConnectionFailed
+  /// caused by -3005 is typically retriable after a TIME_WAIT drain,
+  /// while -3008/-3001 generally are not.
+  int lastNsapiError() const;
+
 private:
   static constexpr size_t kMaxHostLen = 128;
   static constexpr size_t kMaxUserLen = 96;

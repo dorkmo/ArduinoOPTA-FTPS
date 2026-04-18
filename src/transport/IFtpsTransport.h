@@ -65,6 +65,11 @@ public:
 
   virtual bool getPeerCertFingerprint(char *out, size_t outLen) { return false; }
   virtual int getLastTlsError() { return 0; }
+  // Most-recent NSAPI socket-layer error code (e.g. -3005 NSAPI_ERROR_NO_SOCKET
+  // for LWIP pool exhaustion). 0 if none. Distinct from getLastTlsError(),
+  // which returns the most recent TLS-layer (mbedtls or NSAPI auth) error.
+  // Default 0 for transports that do not track this.
+  virtual int getLastNsapiError() { return 0; }
 };
 
 #endif // IFTPS_TRANSPORT_H

@@ -37,6 +37,7 @@ public:
 
   bool getPeerCertFingerprint(char *out, size_t outLen) override;
   int getLastTlsError() override;
+  int getLastNsapiError() override;
 
 private:
   bool connectSocket(TCPSocket *&socket,
@@ -68,6 +69,10 @@ private:
   mbedtls_ssl_session *_cachedControlSession = nullptr;
   bool _cachedControlSessionValid = false;
   int _lastTlsError = 0;
+  // Most-recent NSAPI socket-layer error (e.g. -3005 NSAPI_ERROR_NO_SOCKET
+  // from socket->open(), -3008 NSAPI_ERROR_CONNECTION_TIMEOUT from
+  // socket->connect(), etc.). 0 when last socket op succeeded.
+  int _lastNsapiError = 0;
 };
 
 #endif // MBED_SECURE_SOCKET_FTPS_TRANSPORT_H

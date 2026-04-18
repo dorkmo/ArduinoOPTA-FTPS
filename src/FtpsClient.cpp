@@ -1476,3 +1476,7 @@ bool FtpsClient::reconnect(char *error, size_t errorSize) {
 FtpsError FtpsClient::lastError() const {
   return _lastError;
 }
+
+int FtpsClient::lastNsapiError() const {
+  return _transport != nullptr ? _transport->getLastNsapiError() : 0;
+}

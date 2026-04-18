@@ -295,6 +295,7 @@ bool MbedSecureSocketFtpsTransport::connectSocket(TCPSocket *&socket,
 
 	nsapi_error_t openResult = socket->open(_network);
 	if (openResult != NSAPI_ERROR_OK) {
+		_lastNsapiError = (int)openResult;
 		char buf[64];
 		snprintf(buf, sizeof(buf), "xport:open-failed:%d", (int)openResult);
 		ftpsTransportTrace(buf);
@@ -309,6 +310,7 @@ bool MbedSecureSocketFtpsTransport::connectSocket(TCPSocket *&socket,
 
 	nsapi_error_t connResult = socket->connect(address);
 	if (connResult != NSAPI_ERROR_OK) {
+		_lastNsapiError = (int)connResult;
 		char buf[64];
 		snprintf(buf, sizeof(buf), "xport:connect-failed:%d", (int)connResult);
 		ftpsTransportTrace(buf);
@@ -320,6 +322,7 @@ bool MbedSecureSocketFtpsTransport::connectSocket(TCPSocket *&socket,
 		return failWith(error, errorSize, emsg);
 	}
 
+	_lastNsapiError = 0;
 	return true;
 }
 
@@ -635,4 +638,8 @@ bool MbedSecureSocketFtpsTransport::getPeerCertFingerprint(char *out, size_t out
 
 int MbedSecureSocketFtpsTransport::getLastTlsError() {
 	return _lastTlsError;
+}
+
+int MbedSecureSocketFtpsTransport::getLastNsapiError() {
+	return _lastNsapiError;
 }
