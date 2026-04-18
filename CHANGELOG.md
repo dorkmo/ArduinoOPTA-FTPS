@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-04-18
+
+### Added
+- Added Arduino CI workflows for linting and Opta example compilation.
+- Added a primary public header `src/FTPSclientOPTA.h` to match the library
+  metadata name and satisfy Arduino Lint header-name guidance.
+
+### Changed
+- Updated Arduino Lint workflow configuration to disable Library Manager index
+  enforcement in CI for this repository state.
+
 ## [0.2.2] - 2026-04-18
 
 ### Changed
