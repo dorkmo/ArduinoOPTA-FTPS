@@ -209,14 +209,22 @@ Planned follow-up examples after broader transport/client validation lands:
 
 ## Current Status
 
-The library has been validated on real Arduino Opta hardware (v0.1.0):
+The library has been validated on real Arduino Opta hardware:
 
 - All core operations pass: connect, mkd, store, size, retrieve, quit
 - SHA-256 fingerprint pinning verified on-device
 - TLS session reuse hinting implemented for data-channel handshakes
-- Socket lifecycle hardened (delete after close) to prevent Mbed OS hard faults
-- TLS close timeouts prevent indefinite hangs during shutdown
-- Trace callback support for diagnostics and watchdog integration
+- Socket lifecycle hardened: ordered tear-down (TCP close → TLS delete
+  → TCP delete) prevents Mbed OS hard faults and the historical
+  `delete tls` hang
+- TLS close timeouts and `SO_LINGER` (where supported) prevent
+  indefinite hangs during shutdown
+- **Multi-file backup verified end-to-end against a pyftpdlib FTPS
+  server: 8 uploads, 0 failed in a single session (2026-04-17)**
+- Trace callback support for diagnostics and watchdog integration,
+  including new `xport:cleanup:*`, `xport:linger-*`, and
+  `xport:open-failed:*` / `xport:connect-failed:*` traces for
+  fine-grained socket-lifecycle observability
 
 Remaining work:
 
@@ -266,10 +274,10 @@ For multi-file backup workflows on Opta, the practical consequences are:
   exhaustion from network errors.
 
 A recipe for working around both constraints in an application that also
-hosts a web UI is documented in
-[CODE REVIEW/OPTA_LWIP_BACKUP_RECIPE_04172026.md](CODE%20REVIEW/OPTA_LWIP_BACKUP_RECIPE_04172026.md).
-Follow-up ideas for raising the per-file throughput ceiling are tracked
-in [CODE REVIEW/MULTI_FILE_BACKUP_FOLLOWUPS_04172026.md](CODE%20REVIEW/MULTI_FILE_BACKUP_FOLLOWUPS_04172026.md).
+hosts a web UI is documented in the integrating Tank Alarm Server
+project (see
+`ArduinoSMSTankAlarm/CODE REVIEW/OPTA_LWIP_BACKUP_RECIPE_04172026.md`
+and `MULTI_FILE_BACKUP_FOLLOWUPS_04172026.md`).
 
 ## Project Documentation
 

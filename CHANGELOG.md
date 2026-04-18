@@ -13,15 +13,33 @@ All notable changes to this project will be documented in this file.
   On some FTPS servers this blocked 60+ seconds, tripping the caller's
   watchdog and rebooting the device. The close path is now:
 
-  1. Flip the underlying `TCPSocket` to non-blocking with zero timeout.
-  2. Send TLS `close_notify` directly via
-     `mbedtls_ssl_close_notify(tls->get_ssl_context())`. This lets the
-     server recognize graceful shutdown and emit its final `226 Transfer
-     complete` reply promptly, without invoking Mbed's blocking close
-     path.
-  3. Abandon the heap objects (no `delete`, no `close()`). Both were
-     observed to hang the device on Mbed OS 4.5.0; the heap cost is
-     bounded to ~4 KB per transfer and clears on reboot.
+  1. Request abortive close on the underlying `TCPSocket` via
+     `setsockopt(NSAPI_LINGER, {l_onoff=1, l_linger=0})`. On platforms
+     that honor `SO_LINGER` this turns close into an immediate TCP RST
+     instead of a FIN/ACK round-trip. The transport now traces
+     `xport:linger-set` on success and
+     `xport:linger-unsupported:<nsapi>` when the platform ignores it
+     (Arduino Opta returns `-3002` `NSAPI_ERROR_UNSUPPORTED`).
+  2. Flip the underlying `TCPSocket` to non-blocking with zero timeout
+     as a safety net.
+  3. Send TLS `close_notify` directly via
+     `mbedtls_ssl_close_notify(tls->get_ssl_context())` so the FTPS
+     server emits its final `226 Transfer complete` reply promptly
+     without invoking Mbed's blocking close path.
+  4. Tear the pair down in this order: **close the `TCPSocket` first,
+     then `delete` the `TLSSocketWrapper`, then `delete` the
+     `TCPSocket`.** The historical `delete tls` hang is avoided
+     because the TCP layer is already in CLOSED state before the TLS
+     destructor unwinds its BIO callbacks. Each step emits a trace
+     (`xport:cleanup:tcp-close` / `tcp-closed` / `tls-delete` /
+     `tls-deleted` / `tcp-delete` / `tcp-deleted`) so any future hang
+     can be pinpointed.
+
+  An earlier `FTPS_ABANDON_ON_CLOSE` macro (default `1`) deliberately
+  leaked one TLSSocketWrapper per transfer to dodge the historical
+  hang. With the reordered cleanup proven safe at runtime, the macro
+  now defaults to `0` (full cleanup); the abandon code path is
+  retained behind the macro for emergency fallback only.
 
   Live verification on an Arduino Opta (mbed_opta core 4.5.0):
   - Backup now returns `HTTP 200` in ~8-30 s (was hanging 60-90 s →
@@ -31,38 +49,33 @@ All notable changes to this project will be documented in this file.
     timeout before sending `226`.
   - Device remains alive across backup cycles; no watchdog resets.
 
+- **Surface socket-pool exhaustion on data-channel failures.** When
+  `socket.open()` or `socket.connect()` fails the transport now traces
+  `xport:open-failed:<nsapi>` / `xport:connect-failed:<nsapi>` so the
+  integrator can distinguish socket-pool exhaustion (`-3005`
+  `NSAPI_ERROR_NO_SOCKET`) from transient network errors.
+
 ### Multi-file FTPS backup verified on Arduino Opta (2026-04-17)
 
 Following the close-path fix above, multi-file backup runs to a pyftpdlib
 FTPS server were proven end-to-end on real hardware: **8 files uploaded,
-0 failed** in a single session. Two integration-side adjustments were
-required to work around hard limits in the Mbed OS LWIP build shipped with
-`arduino:mbed_opta` 4.5.0:
+0 failed** in a single session. The library-side changes that made this
+possible are already itemized in the Fixed section. One additional
+integration-side observation surfaced during this work:
 
-1. **Reorder the data-socket cleanup** — close the underlying `TCPSocket`
-   first, then `delete` the `TLSSocketWrapper`, then `delete` the
-   `TCPSocket`. Doing the deletes in this order avoids the historical
-   `delete tls` hang because the TCP layer is already in CLOSED state
-   before the TLS destructor unwinds its BIO callbacks. New transport
-   traces:
-   `xport:cleanup:tcp-close` / `tcp-closed` / `tls-delete` / `tls-deleted`
-   / `tcp-delete` / `tcp-deleted`.
-
-2. **Diagnose `SO_LINGER` support at runtime** — the transport now traces
-   `xport:linger-set` on success or `xport:linger-unsupported:<nsapi>` on
-   failure. On Opta this returns `-3002` (`NSAPI_ERROR_UNSUPPORTED`),
-   which means every closed data socket sits in `TIME_WAIT` for ~60 s.
-
-3. **Surface the actual nsapi code on data-channel failures** — when
-   `socket.open()` or `socket.connect()` fails the transport now traces
-   `xport:open-failed:<nsapi>` / `xport:connect-failed:<nsapi>` so the
-   integrator can distinguish socket-pool exhaustion (`-3005`
-   `NSAPI_ERROR_NO_SOCKET`) from transient network errors.
+- On Arduino Opta the LWIP socket pool is hard-baked at 4 PCBs. The
+  `MBED_CONF_LWIP_SOCKET_MAX` / `MBED_CONF_LWIP_TCP_SOCKET_MAX` macros
+  in `variants/OPTA/mbed_config.h` cannot be raised because
+  `libmbed.a` is shipped as a precompiled archive. Combined with the
+  Opta's lack of `SO_LINGER` support (every close goes through
+  `TIME_WAIT` for ~60 s), back-to-back FTPS file uploads need
+  application-level pacing.
 
 The matching application-side workarounds (release the listening server
 socket during backup, wait for `TIME_WAIT` to drain between files) are
-integrator concerns, not library concerns, and are described in
-[CODE REVIEW/OPTA_LWIP_BACKUP_RECIPE_04172026.md](CODE%20REVIEW/OPTA_LWIP_BACKUP_RECIPE_04172026.md).
+integrator concerns, not library concerns, and are described in the
+integrating Tank Alarm Server project documentation
+(`ArduinoSMSTankAlarm/CODE REVIEW/OPTA_LWIP_BACKUP_RECIPE_04172026.md`).
 
 The earlier "first file succeeds, subsequent files fail with
 `ConnectionFailed`" limitation is **resolved** at the library level. The
