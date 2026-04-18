@@ -138,7 +138,14 @@ if (client.connect(config, error, sizeof(error))) {
 }
 ```
 
-The public API surface is `begin()`, `connect()`, `setTraceCallback()`, `lastPhase()`, `mkd()`, `size()`, `store()`, `retrieve()`, `quit()`, and `lastError()`. `begin()` initializes the transport layer with the Mbed `NetworkInterface` and must be called once before `connect()`. `lastError()` returns an `FtpsError` enum for programmatic error handling alongside the human-readable `char*` error buffer. `setTraceCallback()` registers an optional callback invoked at each protocol phase for diagnostics or watchdog integration.
+The public API surface is `begin()`, `connect()`, `setTraceCallback()`, `lastPhase()`, `mkd()`, `size()`, `list()`, `dele()`, `rmd()`, `rename()`, `store()`, `retrieve()`, `quit()`, `lastError()`, and `lastNsapiError()`. `begin()` initializes the transport layer with the Mbed `NetworkInterface` and must be called once before `connect()`. `lastError()` returns an `FtpsError` enum for programmatic error handling alongside the human-readable `char*` error buffer. `lastNsapiError()` exposes the most recent socket-layer code (for example `-3005` when LWIP socket-pool pressure causes a transient data-channel open failure). `setTraceCallback()` registers an optional callback invoked at each protocol phase for diagnostics or watchdog integration.
+
+`FtpsErrors.h` also provides two sketch-level classifier helpers used by multi-file retry loops:
+
+- `ftpsIsSessionDead(err)`
+- `ftpsIsTransferRetriable(err, nsapiCode)`
+
+These helpers standardize error classification across projects while keeping retry/backoff policy in the application layer.
 
 The v1 public config intentionally does not expose `securityMode` or `passiveMode` toggles. Until additional modes are implemented, the library surface is fixed to Explicit FTPS plus protected passive transfers so sketches cannot accidentally rely on unsupported options.
 
@@ -191,13 +198,15 @@ The repository currently includes:
 
 - `examples/BasicUpload/BasicUpload.ino`
 - `examples/BasicDownload/BasicDownload.ino`
+- `examples/RetryUpload/RetryUpload.ino`
 - `examples/FileZillaLiveTest/FileZillaLiveTest.ino`
 - `examples/PyftpdlibLiveTest/PyftpdlibLiveTest.ino`
 - `examples/WDMyCloudLiveTest/WDMyCloudLiveTest.ino`
 - `examples/WebHarnessLiveTest/WebHarnessLiveTest.ino`
+- `examples/WebFileManagerLiveTest/WebFileManagerLiveTest.ino`
 - `FtpsSpikeTest/FtpsSpikeTest.ino`
 
-The upload/download examples and the FileZilla live-test sketch emit structured serial diagnostics so Opta-side runs are easy to inspect in the serial monitor. The **PyftpdlibLiveTest** example bundles a self-contained Python FTPS server (`ftps_server.py`) and certificate generator (`gen_cert.py`) so you can test the library without installing any third-party server software — just `pip install pyftpdlib pyOpenSSL` and run the scripts. The **WDMyCloudLiveTest** example targets WD My Cloud NAS devices running My Cloud OS 5 and includes a [setup guide](examples/WDMyCloudLiveTest/README.md) for enabling FTPS on the NAS and extracting the certificate fingerprint. The web harness sketch hosts a lightweight LAN page for updating FTPS settings and running small connect/upload/download/quit tests without reflashing, uses token-gated actions behind a small passcode unlock step, and supports downloadable plain-text test reports.
+The upload/download examples and the FileZilla live-test sketch emit structured serial diagnostics so Opta-side runs are easy to inspect in the serial monitor. The **PyftpdlibLiveTest** example bundles a self-contained Python FTPS server (`ftps_server.py`) and certificate generator (`gen_cert.py`) so you can test the library without installing any third-party server software — just `pip install pyftpdlib pyOpenSSL` and run the scripts. The **WDMyCloudLiveTest** example targets WD My Cloud NAS devices running My Cloud OS 5 and includes a [setup guide](examples/WDMyCloudLiveTest/README.md) for enabling FTPS on the NAS and extracting the certificate fingerprint. The web harness sketch hosts a lightweight LAN page for updating FTPS settings and running small connect/upload/download/quit tests without reflashing, uses token-gated actions behind a small passcode unlock step, and supports downloadable plain-text test reports. The web file manager sketch builds on that harness and adds authenticated `/fs` routes for remote list, mkdir, delete, move, and demo copy workflows (copy remains buffer-limited in the example). On `arduino:mbed_opta` 4.5.0, local directory listing is currently disabled in this example build because `<dirent.h>` is not available in the shipped toolchain.
 
 Planned follow-up examples after broader transport/client validation lands:
 
@@ -221,6 +230,10 @@ The library has been validated on real Arduino Opta hardware:
   indefinite hangs during shutdown
 - **Multi-file backup verified end-to-end against a pyftpdlib FTPS
   server: 8 uploads, 0 failed in a single session (2026-04-17)**
+- Web file manager live validation passed on real Opta against local
+  pyftpdlib FTPS (`2026-04-18`): connect, remote list, upload,
+  download, copy, move, delete, auth-gate enforcement, bad-fingerprint
+  rejection, bad-password rejection, and reconnect-after-server-restart
 - Trace callback support for diagnostics and watchdog integration,
   including new `xport:cleanup:*`, `xport:linger-*`, and
   `xport:open-failed:*` / `xport:connect-failed:*` traces for
@@ -241,6 +254,9 @@ Remaining work:
 - Compatibility beyond pyftpdlib is not yet validated on hardware
 - Servers that enforce strict TLS session reuse may require additional transport work
 - DHCP may hang on some Opta/network configurations; static IP is recommended
+- `examples/WebFileManagerLiveTest` uses safer placeholder defaults and
+  requires explicit runtime configuration for host credentials and
+  fingerprint before live FTPS actions
 
 ### Arduino Opta networking constraints (mbed_opta 4.5.0)
 

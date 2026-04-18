@@ -50,6 +50,26 @@ public:
   bool size(const char *remotePath, size_t &remoteBytes,
             char *error, size_t errorSize);
 
+  /// List a remote directory (MLSD preferred, LIST fallback) into listingText.
+  bool list(const char *remotePath,
+            char *listingText,
+            size_t listingTextSize,
+            size_t &bytesRead,
+            char *error,
+            size_t errorSize);
+
+  /// Delete a remote file via DELE.
+  bool dele(const char *remotePath, char *error, size_t errorSize);
+
+  /// Remove a remote directory via RMD.
+  bool rmd(const char *remoteDir, char *error, size_t errorSize);
+
+  /// Rename or move a remote path via RNFR/RNTO.
+  bool rename(const char *fromPath,
+              const char *toPath,
+              char *error,
+              size_t errorSize);
+
   /// Upload data to remotePath via STOR.
   bool store(const char *remotePath, const uint8_t *data, size_t length,
              char *error, size_t errorSize);

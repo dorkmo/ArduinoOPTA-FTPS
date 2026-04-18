@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Web file manager hardening in `examples/WebFileManagerLiveTest`:
+  safer placeholder FTPS defaults, non-default harness passcode, and
+  boot self-test disabled by default for normal runs.
+- Live WebFileManager validation pass on real Opta (`2026-04-18`) against
+  local pyftpdlib FTPS: connect, remote list, upload, download, copy,
+  move, delete, token-auth enforcement, bad-fingerprint rejection,
+  bad-password rejection, and reconnect success after server restart.
+
+### Changed
+- Updated README to reflect current `WebFileManagerLiveTest` behavior on
+  `arduino:mbed_opta` 4.5.0, including the temporary local-listing
+  limitation due missing `<dirent.h>` in the shipped toolchain.
+
 ### Fixed
 - **FTPS backup hang / watchdog reset on Arduino Opta (Mbed OS)**
   `MbedSecureSocketFtpsTransport::closeData()` and `closeControl()` previously

@@ -591,6 +591,412 @@ bool FtpsClient::size(const char *remotePath,
   return true;
 }
 
+bool FtpsClient::list(const char *remotePath,
+                      char *listingText,
+                      size_t listingTextSize,
+                      size_t &bytesRead,
+                      char *error,
+                      size_t errorSize) {
+  bytesRead = 0;
+  clearError(error, errorSize);
+
+  if (_transport == nullptr || !_connected) {
+    return failWith(
+        _lastError,
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        "Call connect() before list().");
+  }
+
+  if (listingText == nullptr || listingTextSize == 0) {
+    return failWith(
+        _lastError,
+        FtpsError::ListFailed,
+        error,
+        errorSize,
+        "A non-empty destination buffer is required for list().");
+  }
+
+  listingText[0] = '\0';
+  const char *targetPath = hasValue(remotePath) ? remotePath : ".";
+
+  char reply[FTPS_REPLY_BUFFER_SIZE] = {};
+  int code = ftpSendCommand(*_transport, "PASV", reply, sizeof(reply));
+  if (code < 0) {
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending PASV.");
+  }
+
+  if (code != 227) {
+    return failWith(
+        _lastError,
+        FtpsError::PassiveModeRejected,
+        error,
+        errorSize,
+        hasValue(reply) ? reply : "PASV was rejected.");
+  }
+
+  char dataHost[32] = {};
+  FtpEndpoint dataEndpoint = {};
+  if (!parsePasv(reply, dataEndpoint, dataHost, sizeof(dataHost))) {
+    return failWith(
+        _lastError,
+        FtpsError::PasvParseFailed,
+        error,
+        errorSize,
+        "Failed to parse PASV response.");
+  }
+
+  dataEndpoint.host = _activeConfig.host;
+
+  FtpTlsConfig tls = {};
+  tls.securityMode = FtpTlsSecurityMode::ExplicitTls;
+  tls.serverName = _activeConfig.tlsServerName;
+  tls.pinnedFingerprint =
+      (_activeConfig.trustMode == FtpsTrustMode::Fingerprint) ? _normalizedFingerprint : nullptr;
+  tls.rootCaPem = (_activeConfig.trustMode == FtpsTrustMode::ImportedCert) ? _activeConfig.rootCaPem : nullptr;
+  tls.validateServerCert = _activeConfig.validateServerCert;
+
+  if (!_transport->openDataChannel(dataEndpoint, error, errorSize)) {
+    return failWith(
+        _lastError,
+        FtpsError::DataConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Failed to open passive data channel for list().");
+  }
+
+  bool usedMlsd = true;
+  code = ftpSendCommandWithArg(*_transport,
+                               "MLSD",
+                               targetPath,
+                               reply,
+                               sizeof(reply),
+                               error,
+                               errorSize);
+  if (code < 0) {
+    _transport->closeData();
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending MLSD.");
+  }
+
+  if (code != 125 && code != 150) {
+    usedMlsd = false;
+    code = ftpSendCommandWithArg(*_transport,
+                                 "LIST",
+                                 targetPath,
+                                 reply,
+                                 sizeof(reply),
+                                 error,
+                                 errorSize);
+    if (code < 0) {
+      _transport->closeData();
+      return failAndDisconnect(
+          FtpsError::ConnectionFailed,
+          error,
+          errorSize,
+          hasValue(error) ? error : "Control connection lost while sending LIST.");
+    }
+    if (code != 125 && code != 150) {
+      _transport->closeData();
+      return failWith(
+          _lastError,
+          FtpsError::ListFailed,
+          error,
+          errorSize,
+          hasValue(reply) ? reply : "MLSD/LIST was rejected.");
+    }
+  }
+
+  if (!_transport->upgradeDataToTls(tls, error, errorSize)) {
+    int tlsError = _transport->getLastTlsError();
+    FtpsError failure = (tlsError == NSAPI_ERROR_AUTH_FAILURE)
+        ? FtpsError::SessionReuseRequired
+        : FtpsError::DataTlsHandshakeFailed;
+    drainFinalTransferReply(*_transport);
+    return failWith(
+        _lastError,
+        failure,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Data-channel TLS handshake failed after list command.");
+  }
+
+  unsigned long dataReadStart = millis();
+  while (true) {
+    if (bytesRead + 1U >= listingTextSize) {
+      _transport->closeData();
+      drainFinalTransferReply(*_transport);
+      listingText[0] = '\0';
+      bytesRead = 0;
+      return failWith(
+          _lastError,
+          FtpsError::ListFailed,
+          error,
+          errorSize,
+          "List output exceeded destination buffer.");
+    }
+
+    int readResult = _transport->dataRead(
+        reinterpret_cast<uint8_t *>(listingText + bytesRead),
+        listingTextSize - bytesRead - 1U);
+    if (readResult == NSAPI_ERROR_WOULD_BLOCK) {
+      ftpsProgressPulse();
+      if ((millis() - dataReadStart) >= FTPS_DATA_IO_TIMEOUT_MS) {
+        _transport->closeData();
+        drainFinalTransferReply(*_transport);
+        listingText[0] = '\0';
+        bytesRead = 0;
+        return failWith(
+            _lastError,
+            FtpsError::ListFailed,
+            error,
+            errorSize,
+            "Timed out while reading list data channel.");
+      }
+      delay(5);
+      continue;
+    }
+
+    if (readResult > 0) {
+      bytesRead += static_cast<size_t>(readResult);
+      dataReadStart = millis();
+      continue;
+    }
+
+    if (readResult == 0) {
+      break;
+    }
+
+    _transport->closeData();
+    drainFinalTransferReply(*_transport);
+    listingText[0] = '\0';
+    bytesRead = 0;
+    return failWith(
+        _lastError,
+        FtpsError::ListFailed,
+        error,
+        errorSize,
+        "Failed while reading list data channel.");
+  }
+
+  listingText[bytesRead] = '\0';
+  _transport->closeData();
+
+  code = ftpReadResponse(*_transport, reply, sizeof(reply));
+  if (code < 0) {
+    listingText[0] = '\0';
+    bytesRead = 0;
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost before final LIST/MLSD reply.");
+  }
+
+  if (code != 226 && code != 250) {
+    listingText[0] = '\0';
+    bytesRead = 0;
+    return failWith(
+        _lastError,
+        FtpsError::FinalReplyFailed,
+        error,
+        errorSize,
+        hasValue(reply) ? reply : "Final list reply was not successful.");
+  }
+
+  if (usedMlsd && bytesRead == 0) {
+    // Some servers return 150/226 for empty MLSD; keep success semantics.
+  }
+
+  _lastError = FtpsError::None;
+  return true;
+}
+
+bool FtpsClient::dele(const char *remotePath, char *error, size_t errorSize) {
+  clearError(error, errorSize);
+
+  if (_transport == nullptr || !_connected) {
+    return failWith(
+        _lastError,
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        "Call connect() before dele().");
+  }
+
+  if (!hasValue(remotePath)) {
+    return failWith(
+        _lastError,
+        FtpsError::DeleteFailed,
+        error,
+        errorSize,
+        "remotePath is required for dele().");
+  }
+
+  char reply[FTPS_REPLY_BUFFER_SIZE] = {};
+  int code = ftpSendCommandWithArg(*_transport,
+                                   "DELE",
+                                   remotePath,
+                                   reply,
+                                   sizeof(reply),
+                                   error,
+                                   errorSize);
+  if (code < 0) {
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending DELE.");
+  }
+
+  if (code != 250) {
+    return failWith(
+        _lastError,
+        FtpsError::DeleteFailed,
+        error,
+        errorSize,
+        hasValue(reply) ? reply : "DELE was rejected.");
+  }
+
+  _lastError = FtpsError::None;
+  return true;
+}
+
+bool FtpsClient::rmd(const char *remoteDir, char *error, size_t errorSize) {
+  clearError(error, errorSize);
+
+  if (_transport == nullptr || !_connected) {
+    return failWith(
+        _lastError,
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        "Call connect() before rmd().");
+  }
+
+  if (!hasValue(remoteDir)) {
+    return failWith(
+        _lastError,
+        FtpsError::DirectoryRemoveFailed,
+        error,
+        errorSize,
+        "remoteDir is required for rmd().");
+  }
+
+  char reply[FTPS_REPLY_BUFFER_SIZE] = {};
+  int code = ftpSendCommandWithArg(*_transport,
+                                   "RMD",
+                                   remoteDir,
+                                   reply,
+                                   sizeof(reply),
+                                   error,
+                                   errorSize);
+  if (code < 0) {
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending RMD.");
+  }
+
+  if (code != 250) {
+    return failWith(
+        _lastError,
+        FtpsError::DirectoryRemoveFailed,
+        error,
+        errorSize,
+        hasValue(reply) ? reply : "RMD was rejected.");
+  }
+
+  _lastError = FtpsError::None;
+  return true;
+}
+
+bool FtpsClient::rename(const char *fromPath,
+                        const char *toPath,
+                        char *error,
+                        size_t errorSize) {
+  clearError(error, errorSize);
+
+  if (_transport == nullptr || !_connected) {
+    return failWith(
+        _lastError,
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        "Call connect() before rename().");
+  }
+
+  if (!hasValue(fromPath) || !hasValue(toPath)) {
+    return failWith(
+        _lastError,
+        FtpsError::RenameFailed,
+        error,
+        errorSize,
+        "fromPath and toPath are required for rename().");
+  }
+
+  char reply[FTPS_REPLY_BUFFER_SIZE] = {};
+  int code = ftpSendCommandWithArg(*_transport,
+                                   "RNFR",
+                                   fromPath,
+                                   reply,
+                                   sizeof(reply),
+                                   error,
+                                   errorSize);
+  if (code < 0) {
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending RNFR.");
+  }
+
+  if (code != 350) {
+    return failWith(
+        _lastError,
+        FtpsError::RenameFailed,
+        error,
+        errorSize,
+        hasValue(reply) ? reply : "RNFR was rejected.");
+  }
+
+  code = ftpSendCommandWithArg(*_transport,
+                               "RNTO",
+                               toPath,
+                               reply,
+                               sizeof(reply),
+                               error,
+                               errorSize);
+  if (code < 0) {
+    return failAndDisconnect(
+        FtpsError::ConnectionFailed,
+        error,
+        errorSize,
+        hasValue(error) ? error : "Control connection lost while sending RNTO.");
+  }
+
+  if (code != 250) {
+    return failWith(
+        _lastError,
+        FtpsError::RenameFailed,
+        error,
+        errorSize,
+        hasValue(reply) ? reply : "RNTO was rejected.");
+  }
+
+  _lastError = FtpsError::None;
+  return true;
+}
+
 bool FtpsClient::connect(const FtpsServerConfig &config, char *error, size_t errorSize) {
   clearError(error, errorSize);
 
