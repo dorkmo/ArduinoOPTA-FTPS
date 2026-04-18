@@ -1,6 +1,6 @@
-# ArduinoOPTA-FTPS
+# OptaFTPSclient
 
-ArduinoOPTA-FTPS is an experimental repository for a general-purpose FTPS client library for Arduino Opta devices.
+OptaFTPSclient is an experimental repository for a general-purpose FTPS client library for Arduino Opta devices.
 
 The goal is to provide a reusable, Opta-first FTPS library built on the board's Ethernet and Mbed networking stack, with initial validation targeted against a WD My Cloud PR4100, vsftpd, and FileZilla Server, and designed to support other standards-compliant FTPS servers over time.
 
