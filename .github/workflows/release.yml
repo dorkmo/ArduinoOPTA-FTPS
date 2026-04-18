@@ -23,7 +23,7 @@ jobs:
 
       - name: Build library ZIP
         run: |
-          LIB_NAME="OptaFTPSclient"
+          LIB_NAME="FTPSclientOPTA"
           mkdir -p "$LIB_NAME"
           cp -r src examples library.properties LICENSE README.md CHANGELOG.md "$LIB_NAME/"
           zip -r "${LIB_NAME}-${{ steps.version.outputs.version }}.zip" "$LIB_NAME"
@@ -54,8 +54,8 @@ jobs:
       - name: Build FTPS test firmware
         run: |
           LIB_ROOT="$RUNNER_TEMP/arduino-libraries"
-          mkdir -p "$LIB_ROOT/OptaFTPSclient" "$LIB_ROOT/TankAlarm-112025-Common" build/ftps-test
-          cp -r src library.properties "$LIB_ROOT/OptaFTPSclient/"
+          mkdir -p "$LIB_ROOT/FTPSclientOPTA" "$LIB_ROOT/TankAlarm-112025-Common" build/ftps-test
+          cp -r src library.properties "$LIB_ROOT/FTPSclientOPTA/"
           cp -r tankalarm/TankAlarm-112025-Common/src tankalarm/TankAlarm-112025-Common/library.properties "$LIB_ROOT/TankAlarm-112025-Common/"
 
           arduino-cli compile --fqbn arduino:mbed_opta:opta \
@@ -71,6 +71,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            OptaFTPSclient-${{ steps.version.outputs.version }}.zip
+            FTPSclientOPTA-${{ steps.version.outputs.version }}.zip
             TankAlarm-112025-FTPS_Server_Test-v${{ steps.version.outputs.version }}.bin
           generate_release_notes: true

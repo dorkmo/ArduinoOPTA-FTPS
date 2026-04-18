@@ -5,10 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
-- Renamed library metadata `name` to `OptaFTPSclient` for Arduino Library Manager
+- Renamed library metadata `name` to `FTPSclientOPTA` for Arduino Library Manager
   naming compliance (3rd-party libraries must not start with `Arduino`).
 - Updated release packaging workflow artifact and local library folder naming
-  from `ArduinoOPTA-FTPS` to `OptaFTPSclient`.
+  from `ArduinoOPTA-FTPS` to `FTPSclientOPTA`.
 
 ## [0.2.0] - 2026-04-18
 
