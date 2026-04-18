@@ -19,5 +19,5 @@ jobs:
         uses: arduino/arduino-lint-action@v2
         with:
           project-type: library
-          library-manager: update
+          library-manager: false
           compliance: specification
