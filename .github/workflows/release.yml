@@ -21,6 +21,16 @@ jobs:
           VERSION=$(grep '^version=' library.properties | cut -d= -f2)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Validate tag matches library version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          EXPECTED_TAG="v${{ steps.version.outputs.version }}"
+          if [ "$TAG" != "$EXPECTED_TAG" ]; then
+            echo "Tag/version mismatch: tag=$TAG library.properties=$EXPECTED_TAG"
+            exit 1
+          fi
+
       - name: Build library ZIP
         run: |
           LIB_NAME="FTPSclientOPTA"
