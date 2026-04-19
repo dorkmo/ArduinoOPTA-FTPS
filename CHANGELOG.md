@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Removed `PortentaEthernet` from `library.properties` `depends` to satisfy
+  Arduino Lint Library Manager index validation (`LP048`).
+
 ## [0.2.3] - 2026-04-18
 
 ### Added
